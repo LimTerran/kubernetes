@@ -19,6 +19,9 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
+	"time"
+
 	v1beta1 "k8s.io/api/admissionregistration/v1beta1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -65,29 +68,39 @@ func (c *mutatingWebhookConfigurations) Get(name string, options v1.GetOptions) 
 		Resource("mutatingwebhookconfigurations").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // List takes label and field selectors, and returns the list of MutatingWebhookConfigurations that match those selectors.
 func (c *mutatingWebhookConfigurations) List(opts v1.ListOptions) (result *v1beta1.MutatingWebhookConfigurationList, err error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	result = &v1beta1.MutatingWebhookConfigurationList{}
 	err = c.client.Get().
 		Resource("mutatingwebhookconfigurations").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Do().
+		Timeout(timeout).
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested mutatingWebhookConfigurations.
 func (c *mutatingWebhookConfigurations) Watch(opts v1.ListOptions) (watch.Interface, error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	opts.Watch = true
 	return c.client.Get().
 		Resource("mutatingwebhookconfigurations").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Watch()
+		Timeout(timeout).
+		Watch(context.TODO())
 }
 
 // Create takes the representation of a mutatingWebhookConfiguration and creates it.  Returns the server's representation of the mutatingWebhookConfiguration, and an error, if there is any.
@@ -96,7 +109,7 @@ func (c *mutatingWebhookConfigurations) Create(mutatingWebhookConfiguration *v1b
 	err = c.client.Post().
 		Resource("mutatingwebhookconfigurations").
 		Body(mutatingWebhookConfiguration).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -108,7 +121,7 @@ func (c *mutatingWebhookConfigurations) Update(mutatingWebhookConfiguration *v1b
 		Resource("mutatingwebhookconfigurations").
 		Name(mutatingWebhookConfiguration.Name).
 		Body(mutatingWebhookConfiguration).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -119,17 +132,22 @@ func (c *mutatingWebhookConfigurations) Delete(name string, options *v1.DeleteOp
 		Resource("mutatingwebhookconfigurations").
 		Name(name).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *mutatingWebhookConfigurations) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
+	var timeout time.Duration
+	if listOptions.TimeoutSeconds != nil {
+		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
+	}
 	return c.client.Delete().
 		Resource("mutatingwebhookconfigurations").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
+		Timeout(timeout).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
@@ -141,7 +159,7 @@ func (c *mutatingWebhookConfigurations) Patch(name string, pt types.PatchType, d
 		SubResource(subresources...).
 		Name(name).
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }

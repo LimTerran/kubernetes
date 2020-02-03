@@ -19,6 +19,9 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"context"
+	"time"
+
 	v1alpha1 "k8s.io/api/rbac/v1alpha1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -65,29 +68,39 @@ func (c *clusterRoles) Get(name string, options v1.GetOptions) (result *v1alpha1
 		Resource("clusterroles").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // List takes label and field selectors, and returns the list of ClusterRoles that match those selectors.
 func (c *clusterRoles) List(opts v1.ListOptions) (result *v1alpha1.ClusterRoleList, err error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	result = &v1alpha1.ClusterRoleList{}
 	err = c.client.Get().
 		Resource("clusterroles").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Do().
+		Timeout(timeout).
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested clusterRoles.
 func (c *clusterRoles) Watch(opts v1.ListOptions) (watch.Interface, error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	opts.Watch = true
 	return c.client.Get().
 		Resource("clusterroles").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Watch()
+		Timeout(timeout).
+		Watch(context.TODO())
 }
 
 // Create takes the representation of a clusterRole and creates it.  Returns the server's representation of the clusterRole, and an error, if there is any.
@@ -96,7 +109,7 @@ func (c *clusterRoles) Create(clusterRole *v1alpha1.ClusterRole) (result *v1alph
 	err = c.client.Post().
 		Resource("clusterroles").
 		Body(clusterRole).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -108,7 +121,7 @@ func (c *clusterRoles) Update(clusterRole *v1alpha1.ClusterRole) (result *v1alph
 		Resource("clusterroles").
 		Name(clusterRole.Name).
 		Body(clusterRole).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -119,17 +132,22 @@ func (c *clusterRoles) Delete(name string, options *v1.DeleteOptions) error {
 		Resource("clusterroles").
 		Name(name).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *clusterRoles) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
+	var timeout time.Duration
+	if listOptions.TimeoutSeconds != nil {
+		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
+	}
 	return c.client.Delete().
 		Resource("clusterroles").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
+		Timeout(timeout).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
@@ -141,7 +159,7 @@ func (c *clusterRoles) Patch(name string, pt types.PatchType, data []byte, subre
 		SubResource(subresources...).
 		Name(name).
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }

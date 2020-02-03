@@ -19,6 +19,9 @@ limitations under the License.
 package v1
 
 import (
+	"context"
+	"time"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
@@ -66,29 +69,39 @@ func (c *aPIServices) Get(name string, options metav1.GetOptions) (result *v1.AP
 		Resource("apiservices").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // List takes label and field selectors, and returns the list of APIServices that match those selectors.
 func (c *aPIServices) List(opts metav1.ListOptions) (result *v1.APIServiceList, err error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	result = &v1.APIServiceList{}
 	err = c.client.Get().
 		Resource("apiservices").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Do().
+		Timeout(timeout).
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested aPIServices.
 func (c *aPIServices) Watch(opts metav1.ListOptions) (watch.Interface, error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	opts.Watch = true
 	return c.client.Get().
 		Resource("apiservices").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Watch()
+		Timeout(timeout).
+		Watch(context.TODO())
 }
 
 // Create takes the representation of a aPIService and creates it.  Returns the server's representation of the aPIService, and an error, if there is any.
@@ -97,7 +110,7 @@ func (c *aPIServices) Create(aPIService *v1.APIService) (result *v1.APIService, 
 	err = c.client.Post().
 		Resource("apiservices").
 		Body(aPIService).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -109,7 +122,7 @@ func (c *aPIServices) Update(aPIService *v1.APIService) (result *v1.APIService, 
 		Resource("apiservices").
 		Name(aPIService.Name).
 		Body(aPIService).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -124,7 +137,7 @@ func (c *aPIServices) UpdateStatus(aPIService *v1.APIService) (result *v1.APISer
 		Name(aPIService.Name).
 		SubResource("status").
 		Body(aPIService).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -135,17 +148,22 @@ func (c *aPIServices) Delete(name string, options *metav1.DeleteOptions) error {
 		Resource("apiservices").
 		Name(name).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *aPIServices) DeleteCollection(options *metav1.DeleteOptions, listOptions metav1.ListOptions) error {
+	var timeout time.Duration
+	if listOptions.TimeoutSeconds != nil {
+		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
+	}
 	return c.client.Delete().
 		Resource("apiservices").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
+		Timeout(timeout).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
@@ -157,7 +175,7 @@ func (c *aPIServices) Patch(name string, pt types.PatchType, data []byte, subres
 		SubResource(subresources...).
 		Name(name).
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }

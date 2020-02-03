@@ -19,6 +19,9 @@ limitations under the License.
 package v1
 
 import (
+	"context"
+	"time"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -69,31 +72,41 @@ func (c *resourceQuotas) Get(name string, options metav1.GetOptions) (result *v1
 		Resource("resourcequotas").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // List takes label and field selectors, and returns the list of ResourceQuotas that match those selectors.
 func (c *resourceQuotas) List(opts metav1.ListOptions) (result *v1.ResourceQuotaList, err error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	result = &v1.ResourceQuotaList{}
 	err = c.client.Get().
 		Namespace(c.ns).
 		Resource("resourcequotas").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Do().
+		Timeout(timeout).
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested resourceQuotas.
 func (c *resourceQuotas) Watch(opts metav1.ListOptions) (watch.Interface, error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	opts.Watch = true
 	return c.client.Get().
 		Namespace(c.ns).
 		Resource("resourcequotas").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Watch()
+		Timeout(timeout).
+		Watch(context.TODO())
 }
 
 // Create takes the representation of a resourceQuota and creates it.  Returns the server's representation of the resourceQuota, and an error, if there is any.
@@ -103,7 +116,7 @@ func (c *resourceQuotas) Create(resourceQuota *v1.ResourceQuota) (result *v1.Res
 		Namespace(c.ns).
 		Resource("resourcequotas").
 		Body(resourceQuota).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -116,7 +129,7 @@ func (c *resourceQuotas) Update(resourceQuota *v1.ResourceQuota) (result *v1.Res
 		Resource("resourcequotas").
 		Name(resourceQuota.Name).
 		Body(resourceQuota).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -132,7 +145,7 @@ func (c *resourceQuotas) UpdateStatus(resourceQuota *v1.ResourceQuota) (result *
 		Name(resourceQuota.Name).
 		SubResource("status").
 		Body(resourceQuota).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -144,18 +157,23 @@ func (c *resourceQuotas) Delete(name string, options *metav1.DeleteOptions) erro
 		Resource("resourcequotas").
 		Name(name).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *resourceQuotas) DeleteCollection(options *metav1.DeleteOptions, listOptions metav1.ListOptions) error {
+	var timeout time.Duration
+	if listOptions.TimeoutSeconds != nil {
+		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
+	}
 	return c.client.Delete().
 		Namespace(c.ns).
 		Resource("resourcequotas").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
+		Timeout(timeout).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
@@ -168,7 +186,7 @@ func (c *resourceQuotas) Patch(name string, pt types.PatchType, data []byte, sub
 		SubResource(subresources...).
 		Name(name).
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }

@@ -19,6 +19,9 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
+	"time"
+
 	v1beta1 "k8s.io/api/policy/v1beta1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -69,31 +72,41 @@ func (c *podDisruptionBudgets) Get(name string, options v1.GetOptions) (result *
 		Resource("poddisruptionbudgets").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // List takes label and field selectors, and returns the list of PodDisruptionBudgets that match those selectors.
 func (c *podDisruptionBudgets) List(opts v1.ListOptions) (result *v1beta1.PodDisruptionBudgetList, err error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	result = &v1beta1.PodDisruptionBudgetList{}
 	err = c.client.Get().
 		Namespace(c.ns).
 		Resource("poddisruptionbudgets").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Do().
+		Timeout(timeout).
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested podDisruptionBudgets.
 func (c *podDisruptionBudgets) Watch(opts v1.ListOptions) (watch.Interface, error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	opts.Watch = true
 	return c.client.Get().
 		Namespace(c.ns).
 		Resource("poddisruptionbudgets").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Watch()
+		Timeout(timeout).
+		Watch(context.TODO())
 }
 
 // Create takes the representation of a podDisruptionBudget and creates it.  Returns the server's representation of the podDisruptionBudget, and an error, if there is any.
@@ -103,7 +116,7 @@ func (c *podDisruptionBudgets) Create(podDisruptionBudget *v1beta1.PodDisruption
 		Namespace(c.ns).
 		Resource("poddisruptionbudgets").
 		Body(podDisruptionBudget).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -116,7 +129,7 @@ func (c *podDisruptionBudgets) Update(podDisruptionBudget *v1beta1.PodDisruption
 		Resource("poddisruptionbudgets").
 		Name(podDisruptionBudget.Name).
 		Body(podDisruptionBudget).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -132,7 +145,7 @@ func (c *podDisruptionBudgets) UpdateStatus(podDisruptionBudget *v1beta1.PodDisr
 		Name(podDisruptionBudget.Name).
 		SubResource("status").
 		Body(podDisruptionBudget).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -144,18 +157,23 @@ func (c *podDisruptionBudgets) Delete(name string, options *v1.DeleteOptions) er
 		Resource("poddisruptionbudgets").
 		Name(name).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *podDisruptionBudgets) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
+	var timeout time.Duration
+	if listOptions.TimeoutSeconds != nil {
+		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
+	}
 	return c.client.Delete().
 		Namespace(c.ns).
 		Resource("poddisruptionbudgets").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
+		Timeout(timeout).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
@@ -168,7 +186,7 @@ func (c *podDisruptionBudgets) Patch(name string, pt types.PatchType, data []byt
 		SubResource(subresources...).
 		Name(name).
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }

@@ -19,6 +19,9 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
+	"time"
+
 	v1beta1 "k8s.io/api/extensions/v1beta1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -69,31 +72,41 @@ func (c *ingresses) Get(name string, options v1.GetOptions) (result *v1beta1.Ing
 		Resource("ingresses").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // List takes label and field selectors, and returns the list of Ingresses that match those selectors.
 func (c *ingresses) List(opts v1.ListOptions) (result *v1beta1.IngressList, err error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	result = &v1beta1.IngressList{}
 	err = c.client.Get().
 		Namespace(c.ns).
 		Resource("ingresses").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Do().
+		Timeout(timeout).
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested ingresses.
 func (c *ingresses) Watch(opts v1.ListOptions) (watch.Interface, error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	opts.Watch = true
 	return c.client.Get().
 		Namespace(c.ns).
 		Resource("ingresses").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Watch()
+		Timeout(timeout).
+		Watch(context.TODO())
 }
 
 // Create takes the representation of a ingress and creates it.  Returns the server's representation of the ingress, and an error, if there is any.
@@ -103,7 +116,7 @@ func (c *ingresses) Create(ingress *v1beta1.Ingress) (result *v1beta1.Ingress, e
 		Namespace(c.ns).
 		Resource("ingresses").
 		Body(ingress).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -116,7 +129,7 @@ func (c *ingresses) Update(ingress *v1beta1.Ingress) (result *v1beta1.Ingress, e
 		Resource("ingresses").
 		Name(ingress.Name).
 		Body(ingress).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -132,7 +145,7 @@ func (c *ingresses) UpdateStatus(ingress *v1beta1.Ingress) (result *v1beta1.Ingr
 		Name(ingress.Name).
 		SubResource("status").
 		Body(ingress).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -144,18 +157,23 @@ func (c *ingresses) Delete(name string, options *v1.DeleteOptions) error {
 		Resource("ingresses").
 		Name(name).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *ingresses) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
+	var timeout time.Duration
+	if listOptions.TimeoutSeconds != nil {
+		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
+	}
 	return c.client.Delete().
 		Namespace(c.ns).
 		Resource("ingresses").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
+		Timeout(timeout).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
@@ -168,7 +186,7 @@ func (c *ingresses) Patch(name string, pt types.PatchType, data []byte, subresou
 		SubResource(subresources...).
 		Name(name).
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }

@@ -19,6 +19,9 @@ limitations under the License.
 package v1
 
 import (
+	"context"
+	"time"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
@@ -69,31 +72,41 @@ func (c *testTypes) Get(name string, options metav1.GetOptions) (result *v1.Test
 		Resource("testtypes").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // List takes label and field selectors, and returns the list of TestTypes that match those selectors.
 func (c *testTypes) List(opts metav1.ListOptions) (result *v1.TestTypeList, err error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	result = &v1.TestTypeList{}
 	err = c.client.Get().
 		Namespace(c.ns).
 		Resource("testtypes").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Do().
+		Timeout(timeout).
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested testTypes.
 func (c *testTypes) Watch(opts metav1.ListOptions) (watch.Interface, error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	opts.Watch = true
 	return c.client.Get().
 		Namespace(c.ns).
 		Resource("testtypes").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Watch()
+		Timeout(timeout).
+		Watch(context.TODO())
 }
 
 // Create takes the representation of a testType and creates it.  Returns the server's representation of the testType, and an error, if there is any.
@@ -103,7 +116,7 @@ func (c *testTypes) Create(testType *v1.TestType) (result *v1.TestType, err erro
 		Namespace(c.ns).
 		Resource("testtypes").
 		Body(testType).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -116,7 +129,7 @@ func (c *testTypes) Update(testType *v1.TestType) (result *v1.TestType, err erro
 		Resource("testtypes").
 		Name(testType.Name).
 		Body(testType).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -132,7 +145,7 @@ func (c *testTypes) UpdateStatus(testType *v1.TestType) (result *v1.TestType, er
 		Name(testType.Name).
 		SubResource("status").
 		Body(testType).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -144,18 +157,23 @@ func (c *testTypes) Delete(name string, options *metav1.DeleteOptions) error {
 		Resource("testtypes").
 		Name(name).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *testTypes) DeleteCollection(options *metav1.DeleteOptions, listOptions metav1.ListOptions) error {
+	var timeout time.Duration
+	if listOptions.TimeoutSeconds != nil {
+		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
+	}
 	return c.client.Delete().
 		Namespace(c.ns).
 		Resource("testtypes").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
+		Timeout(timeout).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
@@ -168,7 +186,7 @@ func (c *testTypes) Patch(name string, pt types.PatchType, data []byte, subresou
 		SubResource(subresources...).
 		Name(name).
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }

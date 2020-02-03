@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/uuid"
@@ -128,18 +128,6 @@ func rmSetup(t *testing.T) (*httptest.Server, framework.CloseFunc, *replication.
 		t.Fatalf("Failed to create replication controller")
 	}
 	return s, closeFn, rm, informers, clientSet
-}
-
-func rmSimpleSetup(t *testing.T) (*httptest.Server, framework.CloseFunc, clientset.Interface) {
-	masterConfig := framework.NewIntegrationTestMasterConfig()
-	_, s, closeFn := framework.RunAMaster(masterConfig)
-
-	config := restclient.Config{Host: s.URL}
-	clientSet, err := clientset.NewForConfig(&config)
-	if err != nil {
-		t.Fatalf("Error in create clientset: %v", err)
-	}
-	return s, closeFn, clientSet
 }
 
 // Run RC controller and informers
@@ -340,9 +328,7 @@ func testScalingUsingScaleSubresource(t *testing.T, c clientset.Interface, rc *v
 	if err != nil {
 		t.Fatalf("Failed to obtain rc %s: %v", rc.Name, err)
 	}
-	kind := "ReplicationController"
-	scaleClient := c.ExtensionsV1beta1().Scales(ns)
-	scale, err := scaleClient.Get(kind, rc.Name)
+	scale, err := c.CoreV1().ReplicationControllers(ns).GetScale(rc.Name, metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("Failed to obtain scale subresource for rc %s: %v", rc.Name, err)
 	}
@@ -351,12 +337,12 @@ func testScalingUsingScaleSubresource(t *testing.T, c clientset.Interface, rc *v
 	}
 
 	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		scale, err := scaleClient.Get(kind, rc.Name)
+		scale, err := c.CoreV1().ReplicationControllers(ns).GetScale(rc.Name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
 		scale.Spec.Replicas = replicas
-		_, err = scaleClient.Update(kind, scale)
+		_, err = c.CoreV1().ReplicationControllers(ns).UpdateScale(rc.Name, scale)
 		return err
 	}); err != nil {
 		t.Fatalf("Failed to set .Spec.Replicas of scale subresource for rc %s: %v", rc.Name, err)
@@ -450,12 +436,14 @@ func TestAdoption(t *testing.T) {
 				if err != nil {
 					return false, err
 				}
-				if e, a := tc.expectedOwnerReferences(rc), updatedPod.OwnerReferences; reflect.DeepEqual(e, a) {
+
+				e, a := tc.expectedOwnerReferences(rc), updatedPod.OwnerReferences
+				if reflect.DeepEqual(e, a) {
 					return true, nil
-				} else {
-					t.Logf("ownerReferences don't match, expect %v, got %v", e, a)
-					return false, nil
 				}
+
+				t.Logf("ownerReferences don't match, expect %v, got %v", e, a)
+				return false, nil
 			}); err != nil {
 				t.Fatalf("test %q failed: %v", tc.name, err)
 			}
@@ -654,7 +642,7 @@ func TestPodOrphaningAndAdoptionWhenLabelsChange(t *testing.T) {
 		if err != nil {
 			// If the pod is not found, it means the RC picks the pod for deletion (it is extra)
 			// Verify there is only one pod in namespace and it has ControllerRef to the RC
-			if errors.IsNotFound(err) {
+			if apierrors.IsNotFound(err) {
 				pods := getPods(t, podClient, labelMap())
 				if len(pods.Items) != 1 {
 					return false, fmt.Errorf("Expected 1 pod in current namespace, got %d", len(pods.Items))

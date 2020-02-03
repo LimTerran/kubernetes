@@ -19,6 +19,9 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
+	"time"
+
 	v1beta1 "k8s.io/api/rbac/v1beta1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -65,29 +68,39 @@ func (c *clusterRoleBindings) Get(name string, options v1.GetOptions) (result *v
 		Resource("clusterrolebindings").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // List takes label and field selectors, and returns the list of ClusterRoleBindings that match those selectors.
 func (c *clusterRoleBindings) List(opts v1.ListOptions) (result *v1beta1.ClusterRoleBindingList, err error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	result = &v1beta1.ClusterRoleBindingList{}
 	err = c.client.Get().
 		Resource("clusterrolebindings").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Do().
+		Timeout(timeout).
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested clusterRoleBindings.
 func (c *clusterRoleBindings) Watch(opts v1.ListOptions) (watch.Interface, error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	opts.Watch = true
 	return c.client.Get().
 		Resource("clusterrolebindings").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Watch()
+		Timeout(timeout).
+		Watch(context.TODO())
 }
 
 // Create takes the representation of a clusterRoleBinding and creates it.  Returns the server's representation of the clusterRoleBinding, and an error, if there is any.
@@ -96,7 +109,7 @@ func (c *clusterRoleBindings) Create(clusterRoleBinding *v1beta1.ClusterRoleBind
 	err = c.client.Post().
 		Resource("clusterrolebindings").
 		Body(clusterRoleBinding).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -108,7 +121,7 @@ func (c *clusterRoleBindings) Update(clusterRoleBinding *v1beta1.ClusterRoleBind
 		Resource("clusterrolebindings").
 		Name(clusterRoleBinding.Name).
 		Body(clusterRoleBinding).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -119,17 +132,22 @@ func (c *clusterRoleBindings) Delete(name string, options *v1.DeleteOptions) err
 		Resource("clusterrolebindings").
 		Name(name).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *clusterRoleBindings) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
+	var timeout time.Duration
+	if listOptions.TimeoutSeconds != nil {
+		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
+	}
 	return c.client.Delete().
 		Resource("clusterrolebindings").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
+		Timeout(timeout).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
@@ -141,7 +159,7 @@ func (c *clusterRoleBindings) Patch(name string, pt types.PatchType, data []byte
 		SubResource(subresources...).
 		Name(name).
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }

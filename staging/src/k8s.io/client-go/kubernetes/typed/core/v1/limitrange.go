@@ -19,6 +19,9 @@ limitations under the License.
 package v1
 
 import (
+	"context"
+	"time"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -68,31 +71,41 @@ func (c *limitRanges) Get(name string, options metav1.GetOptions) (result *v1.Li
 		Resource("limitranges").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // List takes label and field selectors, and returns the list of LimitRanges that match those selectors.
 func (c *limitRanges) List(opts metav1.ListOptions) (result *v1.LimitRangeList, err error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	result = &v1.LimitRangeList{}
 	err = c.client.Get().
 		Namespace(c.ns).
 		Resource("limitranges").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Do().
+		Timeout(timeout).
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested limitRanges.
 func (c *limitRanges) Watch(opts metav1.ListOptions) (watch.Interface, error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	opts.Watch = true
 	return c.client.Get().
 		Namespace(c.ns).
 		Resource("limitranges").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Watch()
+		Timeout(timeout).
+		Watch(context.TODO())
 }
 
 // Create takes the representation of a limitRange and creates it.  Returns the server's representation of the limitRange, and an error, if there is any.
@@ -102,7 +115,7 @@ func (c *limitRanges) Create(limitRange *v1.LimitRange) (result *v1.LimitRange, 
 		Namespace(c.ns).
 		Resource("limitranges").
 		Body(limitRange).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -115,7 +128,7 @@ func (c *limitRanges) Update(limitRange *v1.LimitRange) (result *v1.LimitRange, 
 		Resource("limitranges").
 		Name(limitRange.Name).
 		Body(limitRange).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -127,18 +140,23 @@ func (c *limitRanges) Delete(name string, options *metav1.DeleteOptions) error {
 		Resource("limitranges").
 		Name(name).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *limitRanges) DeleteCollection(options *metav1.DeleteOptions, listOptions metav1.ListOptions) error {
+	var timeout time.Duration
+	if listOptions.TimeoutSeconds != nil {
+		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
+	}
 	return c.client.Delete().
 		Namespace(c.ns).
 		Resource("limitranges").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
+		Timeout(timeout).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
@@ -151,7 +169,7 @@ func (c *limitRanges) Patch(name string, pt types.PatchType, data []byte, subres
 		SubResource(subresources...).
 		Name(name).
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }

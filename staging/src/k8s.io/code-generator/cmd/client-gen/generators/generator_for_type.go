@@ -387,12 +387,17 @@ func new$.type|publicPlural$(c *$.GroupGoName$$.Version$Client) *$.type|privateP
 var listTemplate = `
 // List takes label and field selectors, and returns the list of $.resultType|publicPlural$ that match those selectors.
 func (c *$.type|privatePlural$) List(opts $.ListOptions|raw$) (result *$.resultType|raw$List, err error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil{
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	result = &$.resultType|raw$List{}
 	err = c.client.Get().
 		$if .namespaced$Namespace(c.ns).$end$
 		Resource("$.type|resource$").
 		VersionedParams(&opts, $.schemeParameterCodec|raw$).
-		Do().
+		Timeout(timeout).
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -401,6 +406,10 @@ func (c *$.type|privatePlural$) List(opts $.ListOptions|raw$) (result *$.resultT
 var listSubresourceTemplate = `
 // List takes $.type|raw$ name, label and field selectors, and returns the list of $.resultType|publicPlural$ that match those selectors.
 func (c *$.type|privatePlural$) List($.type|private$Name string, opts $.ListOptions|raw$) (result *$.resultType|raw$List, err error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil{
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	result = &$.resultType|raw$List{}
 	err = c.client.Get().
 		$if .namespaced$Namespace(c.ns).$end$
@@ -408,7 +417,8 @@ func (c *$.type|privatePlural$) List($.type|private$Name string, opts $.ListOpti
 		Name($.type|private$Name).
 		SubResource("$.subresourcePath$").
 		VersionedParams(&opts, $.schemeParameterCodec|raw$).
-		Do().
+		Timeout(timeout).
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -423,7 +433,7 @@ func (c *$.type|privatePlural$) Get(name string, options $.GetOptions|raw$) (res
 		Resource("$.type|resource$").
 		Name(name).
 		VersionedParams(&options, $.schemeParameterCodec|raw$).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -439,7 +449,7 @@ func (c *$.type|privatePlural$) Get($.type|private$Name string, options $.GetOpt
 		Name($.type|private$Name).
 		SubResource("$.subresourcePath$").
 		VersionedParams(&options, $.schemeParameterCodec|raw$).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -453,7 +463,7 @@ func (c *$.type|privatePlural$) Delete(name string, options *$.DeleteOptions|raw
 		Resource("$.type|resource$").
 		Name(name).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 `
@@ -461,12 +471,17 @@ func (c *$.type|privatePlural$) Delete(name string, options *$.DeleteOptions|raw
 var deleteCollectionTemplate = `
 // DeleteCollection deletes a collection of objects.
 func (c *$.type|privatePlural$) DeleteCollection(options *$.DeleteOptions|raw$, listOptions $.ListOptions|raw$) error {
+	var timeout time.Duration
+	if listOptions.TimeoutSeconds != nil{
+		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
+	}
 	return c.client.Delete().
 		$if .namespaced$Namespace(c.ns).$end$
 		Resource("$.type|resource$").
 		VersionedParams(&listOptions, $.schemeParameterCodec|raw$).
+		Timeout(timeout).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 `
@@ -481,7 +496,7 @@ func (c *$.type|privatePlural$) Create($.type|private$Name string, $.inputType|p
 		Name($.type|private$Name).
 		SubResource("$.subresourcePath$").
 		Body($.inputType|private$).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -495,7 +510,7 @@ func (c *$.type|privatePlural$) Create($.inputType|private$ *$.inputType|raw$) (
 		$if .namespaced$Namespace(c.ns).$end$
 		Resource("$.type|resource$").
 		Body($.inputType|private$).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -511,7 +526,7 @@ func (c *$.type|privatePlural$) Update($.type|private$Name string, $.inputType|p
 		Name($.type|private$Name).
 		SubResource("$.subresourcePath$").
 		Body($.inputType|private$).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -526,7 +541,7 @@ func (c *$.type|privatePlural$) Update($.inputType|private$ *$.inputType|raw$) (
 		Resource("$.type|resource$").
 		Name($.inputType|private$.Name).
 		Body($.inputType|private$).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -544,7 +559,7 @@ func (c *$.type|privatePlural$) UpdateStatus($.type|private$ *$.type|raw$) (resu
 		Name($.type|private$.Name).
 		SubResource("status").
 		Body($.type|private$).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -553,12 +568,17 @@ func (c *$.type|privatePlural$) UpdateStatus($.type|private$ *$.type|raw$) (resu
 var watchTemplate = `
 // Watch returns a $.watchInterface|raw$ that watches the requested $.type|privatePlural$.
 func (c *$.type|privatePlural$) Watch(opts $.ListOptions|raw$) ($.watchInterface|raw$, error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil{
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	opts.Watch = true
 	return c.client.Get().
 		$if .namespaced$Namespace(c.ns).$end$
 		Resource("$.type|resource$").
 		VersionedParams(&opts, $.schemeParameterCodec|raw$).
-		Watch()
+		Timeout(timeout).
+		Watch(context.TODO())
 }
 `
 
@@ -572,7 +592,7 @@ func (c *$.type|privatePlural$) Patch(name string, pt $.PatchType|raw$, data []b
 		SubResource(subresources...).
 		Name(name).
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }

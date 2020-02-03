@@ -19,6 +19,9 @@ limitations under the License.
 package v1
 
 import (
+	"context"
+	"time"
+
 	v1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -69,31 +72,41 @@ func (c *daemonSets) Get(name string, options metav1.GetOptions) (result *v1.Dae
 		Resource("daemonsets").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // List takes label and field selectors, and returns the list of DaemonSets that match those selectors.
 func (c *daemonSets) List(opts metav1.ListOptions) (result *v1.DaemonSetList, err error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	result = &v1.DaemonSetList{}
 	err = c.client.Get().
 		Namespace(c.ns).
 		Resource("daemonsets").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Do().
+		Timeout(timeout).
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested daemonSets.
 func (c *daemonSets) Watch(opts metav1.ListOptions) (watch.Interface, error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	opts.Watch = true
 	return c.client.Get().
 		Namespace(c.ns).
 		Resource("daemonsets").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Watch()
+		Timeout(timeout).
+		Watch(context.TODO())
 }
 
 // Create takes the representation of a daemonSet and creates it.  Returns the server's representation of the daemonSet, and an error, if there is any.
@@ -103,7 +116,7 @@ func (c *daemonSets) Create(daemonSet *v1.DaemonSet) (result *v1.DaemonSet, err 
 		Namespace(c.ns).
 		Resource("daemonsets").
 		Body(daemonSet).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -116,7 +129,7 @@ func (c *daemonSets) Update(daemonSet *v1.DaemonSet) (result *v1.DaemonSet, err 
 		Resource("daemonsets").
 		Name(daemonSet.Name).
 		Body(daemonSet).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -132,7 +145,7 @@ func (c *daemonSets) UpdateStatus(daemonSet *v1.DaemonSet) (result *v1.DaemonSet
 		Name(daemonSet.Name).
 		SubResource("status").
 		Body(daemonSet).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -144,18 +157,23 @@ func (c *daemonSets) Delete(name string, options *metav1.DeleteOptions) error {
 		Resource("daemonsets").
 		Name(name).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *daemonSets) DeleteCollection(options *metav1.DeleteOptions, listOptions metav1.ListOptions) error {
+	var timeout time.Duration
+	if listOptions.TimeoutSeconds != nil {
+		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
+	}
 	return c.client.Delete().
 		Namespace(c.ns).
 		Resource("daemonsets").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
+		Timeout(timeout).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
@@ -168,7 +186,7 @@ func (c *daemonSets) Patch(name string, pt types.PatchType, data []byte, subreso
 		SubResource(subresources...).
 		Name(name).
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }

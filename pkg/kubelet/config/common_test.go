@@ -26,8 +26,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	clientscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
-	"k8s.io/kubernetes/pkg/api/testapi"
 	"k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/apis/core/validation"
 	"k8s.io/kubernetes/pkg/securitycontext"
@@ -37,6 +37,7 @@ func noDefault(*core.Pod) error { return nil }
 
 func TestDecodeSinglePod(t *testing.T) {
 	grace := int64(30)
+	enableServiceLinks := v1.DefaultEnableServiceLinks
 	pod := &v1.Pod{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "",
@@ -58,11 +59,20 @@ func TestDecodeSinglePod(t *testing.T) {
 				TerminationMessagePolicy: v1.TerminationMessageReadFile,
 				SecurityContext:          securitycontext.ValidSecurityContextWithContainerDefaults(),
 			}},
-			SecurityContext: &v1.PodSecurityContext{},
-			SchedulerName:   core.DefaultSchedulerName,
+			SecurityContext:    &v1.PodSecurityContext{},
+			SchedulerName:      core.DefaultSchedulerName,
+			EnableServiceLinks: &enableServiceLinks,
+		},
+		Status: v1.PodStatus{
+			PodIP: "1.2.3.4",
+			PodIPs: []v1.PodIP{
+				{
+					IP: "1.2.3.4",
+				},
+			},
 		},
 	}
-	json, err := runtime.Encode(testapi.Default.Codec(), pod)
+	json, err := runtime.Encode(clientscheme.Codecs.LegacyCodec(v1.SchemeGroupVersion), pod)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -99,6 +109,7 @@ func TestDecodeSinglePod(t *testing.T) {
 
 func TestDecodePodList(t *testing.T) {
 	grace := int64(30)
+	enableServiceLinks := v1.DefaultEnableServiceLinks
 	pod := &v1.Pod{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "",
@@ -121,14 +132,23 @@ func TestDecodePodList(t *testing.T) {
 
 				SecurityContext: securitycontext.ValidSecurityContextWithContainerDefaults(),
 			}},
-			SecurityContext: &v1.PodSecurityContext{},
-			SchedulerName:   core.DefaultSchedulerName,
+			SecurityContext:    &v1.PodSecurityContext{},
+			SchedulerName:      core.DefaultSchedulerName,
+			EnableServiceLinks: &enableServiceLinks,
+		},
+		Status: v1.PodStatus{
+			PodIP: "1.2.3.4",
+			PodIPs: []v1.PodIP{
+				{
+					IP: "1.2.3.4",
+				},
+			},
 		},
 	}
 	podList := &v1.PodList{
 		Items: []v1.Pod{*pod},
 	}
-	json, err := runtime.Encode(testapi.Default.Codec(), podList)
+	json, err := runtime.Encode(clientscheme.Codecs.LegacyCodec(v1.SchemeGroupVersion), podList)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}

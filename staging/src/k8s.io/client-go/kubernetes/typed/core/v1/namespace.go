@@ -19,6 +19,9 @@ limitations under the License.
 package v1
 
 import (
+	"context"
+	"time"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -65,29 +68,39 @@ func (c *namespaces) Get(name string, options metav1.GetOptions) (result *v1.Nam
 		Resource("namespaces").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // List takes label and field selectors, and returns the list of Namespaces that match those selectors.
 func (c *namespaces) List(opts metav1.ListOptions) (result *v1.NamespaceList, err error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	result = &v1.NamespaceList{}
 	err = c.client.Get().
 		Resource("namespaces").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Do().
+		Timeout(timeout).
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested namespaces.
 func (c *namespaces) Watch(opts metav1.ListOptions) (watch.Interface, error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	opts.Watch = true
 	return c.client.Get().
 		Resource("namespaces").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Watch()
+		Timeout(timeout).
+		Watch(context.TODO())
 }
 
 // Create takes the representation of a namespace and creates it.  Returns the server's representation of the namespace, and an error, if there is any.
@@ -96,7 +109,7 @@ func (c *namespaces) Create(namespace *v1.Namespace) (result *v1.Namespace, err 
 	err = c.client.Post().
 		Resource("namespaces").
 		Body(namespace).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -108,7 +121,7 @@ func (c *namespaces) Update(namespace *v1.Namespace) (result *v1.Namespace, err 
 		Resource("namespaces").
 		Name(namespace.Name).
 		Body(namespace).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -123,7 +136,7 @@ func (c *namespaces) UpdateStatus(namespace *v1.Namespace) (result *v1.Namespace
 		Name(namespace.Name).
 		SubResource("status").
 		Body(namespace).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -134,7 +147,7 @@ func (c *namespaces) Delete(name string, options *metav1.DeleteOptions) error {
 		Resource("namespaces").
 		Name(name).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
@@ -146,7 +159,7 @@ func (c *namespaces) Patch(name string, pt types.PatchType, data []byte, subreso
 		SubResource(subresources...).
 		Name(name).
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }

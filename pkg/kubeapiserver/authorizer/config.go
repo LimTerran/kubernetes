@@ -33,7 +33,8 @@ import (
 	"k8s.io/kubernetes/plugin/pkg/auth/authorizer/rbac/bootstrappolicy"
 )
 
-type AuthorizationConfig struct {
+// Config contains the data on how to authorize a request to the Kube API Server
+type Config struct {
 	AuthorizationModes []string
 
 	// Options for ModeABAC
@@ -45,6 +46,8 @@ type AuthorizationConfig struct {
 
 	// Kubeconfig file for Webhook authorization plugin.
 	WebhookConfigFile string
+	// API version of subject access reviews to send to the webhook (e.g. "v1", "v1beta1")
+	WebhookVersion string
 	// TTL for caching of authorized responses from the webhook server.
 	WebhookCacheAuthorizedTTL time.Duration
 	// TTL for caching of unauthorized responses from the webhook server.
@@ -55,7 +58,7 @@ type AuthorizationConfig struct {
 
 // New returns the right sort of union of multiple authorizer.Authorizer objects
 // based on the authorizationMode or an error.
-func (config AuthorizationConfig) New() (authorizer.Authorizer, authorizer.RuleResolver, error) {
+func (config Config) New() (authorizer.Authorizer, authorizer.RuleResolver, error) {
 	if len(config.AuthorizationModes) == 0 {
 		return nil, nil, fmt.Errorf("at least one authorization mode must be passed")
 	}
@@ -75,7 +78,7 @@ func (config AuthorizationConfig) New() (authorizer.Authorizer, authorizer.RuleR
 				config.VersionedInformerFactory.Core().V1().Nodes(),
 				config.VersionedInformerFactory.Core().V1().Pods(),
 				config.VersionedInformerFactory.Core().V1().PersistentVolumes(),
-				config.VersionedInformerFactory.Storage().V1beta1().VolumeAttachments(),
+				config.VersionedInformerFactory.Storage().V1().VolumeAttachments(),
 			)
 			nodeAuthorizer := node.NewAuthorizer(graph, nodeidentifier.NewDefaultNodeIdentifier(), bootstrappolicy.NodeRules())
 			authorizers = append(authorizers, nodeAuthorizer)
@@ -97,6 +100,7 @@ func (config AuthorizationConfig) New() (authorizer.Authorizer, authorizer.RuleR
 			ruleResolvers = append(ruleResolvers, abacAuthorizer)
 		case modes.ModeWebhook:
 			webhookAuthorizer, err := webhook.New(config.WebhookConfigFile,
+				config.WebhookVersion,
 				config.WebhookCacheAuthorizedTTL,
 				config.WebhookCacheUnauthorizedTTL)
 			if err != nil {

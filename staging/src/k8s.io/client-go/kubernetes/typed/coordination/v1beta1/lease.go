@@ -19,6 +19,9 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
+	"time"
+
 	v1beta1 "k8s.io/api/coordination/v1beta1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -68,31 +71,41 @@ func (c *leases) Get(name string, options v1.GetOptions) (result *v1beta1.Lease,
 		Resource("leases").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // List takes label and field selectors, and returns the list of Leases that match those selectors.
 func (c *leases) List(opts v1.ListOptions) (result *v1beta1.LeaseList, err error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	result = &v1beta1.LeaseList{}
 	err = c.client.Get().
 		Namespace(c.ns).
 		Resource("leases").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Do().
+		Timeout(timeout).
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested leases.
 func (c *leases) Watch(opts v1.ListOptions) (watch.Interface, error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	opts.Watch = true
 	return c.client.Get().
 		Namespace(c.ns).
 		Resource("leases").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Watch()
+		Timeout(timeout).
+		Watch(context.TODO())
 }
 
 // Create takes the representation of a lease and creates it.  Returns the server's representation of the lease, and an error, if there is any.
@@ -102,7 +115,7 @@ func (c *leases) Create(lease *v1beta1.Lease) (result *v1beta1.Lease, err error)
 		Namespace(c.ns).
 		Resource("leases").
 		Body(lease).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -115,7 +128,7 @@ func (c *leases) Update(lease *v1beta1.Lease) (result *v1beta1.Lease, err error)
 		Resource("leases").
 		Name(lease.Name).
 		Body(lease).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -127,18 +140,23 @@ func (c *leases) Delete(name string, options *v1.DeleteOptions) error {
 		Resource("leases").
 		Name(name).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *leases) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
+	var timeout time.Duration
+	if listOptions.TimeoutSeconds != nil {
+		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
+	}
 	return c.client.Delete().
 		Namespace(c.ns).
 		Resource("leases").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
+		Timeout(timeout).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
@@ -151,7 +169,7 @@ func (c *leases) Patch(name string, pt types.PatchType, data []byte, subresource
 		SubResource(subresources...).
 		Name(name).
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }

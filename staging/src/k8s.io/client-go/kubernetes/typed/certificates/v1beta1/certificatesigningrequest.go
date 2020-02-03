@@ -19,6 +19,9 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
+	"time"
+
 	v1beta1 "k8s.io/api/certificates/v1beta1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -66,29 +69,39 @@ func (c *certificateSigningRequests) Get(name string, options v1.GetOptions) (re
 		Resource("certificatesigningrequests").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // List takes label and field selectors, and returns the list of CertificateSigningRequests that match those selectors.
 func (c *certificateSigningRequests) List(opts v1.ListOptions) (result *v1beta1.CertificateSigningRequestList, err error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	result = &v1beta1.CertificateSigningRequestList{}
 	err = c.client.Get().
 		Resource("certificatesigningrequests").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Do().
+		Timeout(timeout).
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested certificateSigningRequests.
 func (c *certificateSigningRequests) Watch(opts v1.ListOptions) (watch.Interface, error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	opts.Watch = true
 	return c.client.Get().
 		Resource("certificatesigningrequests").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Watch()
+		Timeout(timeout).
+		Watch(context.TODO())
 }
 
 // Create takes the representation of a certificateSigningRequest and creates it.  Returns the server's representation of the certificateSigningRequest, and an error, if there is any.
@@ -97,7 +110,7 @@ func (c *certificateSigningRequests) Create(certificateSigningRequest *v1beta1.C
 	err = c.client.Post().
 		Resource("certificatesigningrequests").
 		Body(certificateSigningRequest).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -109,7 +122,7 @@ func (c *certificateSigningRequests) Update(certificateSigningRequest *v1beta1.C
 		Resource("certificatesigningrequests").
 		Name(certificateSigningRequest.Name).
 		Body(certificateSigningRequest).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -124,7 +137,7 @@ func (c *certificateSigningRequests) UpdateStatus(certificateSigningRequest *v1b
 		Name(certificateSigningRequest.Name).
 		SubResource("status").
 		Body(certificateSigningRequest).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -135,17 +148,22 @@ func (c *certificateSigningRequests) Delete(name string, options *v1.DeleteOptio
 		Resource("certificatesigningrequests").
 		Name(name).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *certificateSigningRequests) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
+	var timeout time.Duration
+	if listOptions.TimeoutSeconds != nil {
+		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
+	}
 	return c.client.Delete().
 		Resource("certificatesigningrequests").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
+		Timeout(timeout).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
@@ -157,7 +175,7 @@ func (c *certificateSigningRequests) Patch(name string, pt types.PatchType, data
 		SubResource(subresources...).
 		Name(name).
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }

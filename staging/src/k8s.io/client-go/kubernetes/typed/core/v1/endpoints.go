@@ -19,6 +19,9 @@ limitations under the License.
 package v1
 
 import (
+	"context"
+	"time"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -68,31 +71,41 @@ func (c *endpoints) Get(name string, options metav1.GetOptions) (result *v1.Endp
 		Resource("endpoints").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // List takes label and field selectors, and returns the list of Endpoints that match those selectors.
 func (c *endpoints) List(opts metav1.ListOptions) (result *v1.EndpointsList, err error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	result = &v1.EndpointsList{}
 	err = c.client.Get().
 		Namespace(c.ns).
 		Resource("endpoints").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Do().
+		Timeout(timeout).
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested endpoints.
 func (c *endpoints) Watch(opts metav1.ListOptions) (watch.Interface, error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	opts.Watch = true
 	return c.client.Get().
 		Namespace(c.ns).
 		Resource("endpoints").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Watch()
+		Timeout(timeout).
+		Watch(context.TODO())
 }
 
 // Create takes the representation of a endpoints and creates it.  Returns the server's representation of the endpoints, and an error, if there is any.
@@ -102,7 +115,7 @@ func (c *endpoints) Create(endpoints *v1.Endpoints) (result *v1.Endpoints, err e
 		Namespace(c.ns).
 		Resource("endpoints").
 		Body(endpoints).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -115,7 +128,7 @@ func (c *endpoints) Update(endpoints *v1.Endpoints) (result *v1.Endpoints, err e
 		Resource("endpoints").
 		Name(endpoints.Name).
 		Body(endpoints).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -127,18 +140,23 @@ func (c *endpoints) Delete(name string, options *metav1.DeleteOptions) error {
 		Resource("endpoints").
 		Name(name).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *endpoints) DeleteCollection(options *metav1.DeleteOptions, listOptions metav1.ListOptions) error {
+	var timeout time.Duration
+	if listOptions.TimeoutSeconds != nil {
+		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
+	}
 	return c.client.Delete().
 		Namespace(c.ns).
 		Resource("endpoints").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
+		Timeout(timeout).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
@@ -151,7 +169,7 @@ func (c *endpoints) Patch(name string, pt types.PatchType, data []byte, subresou
 		SubResource(subresources...).
 		Name(name).
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }

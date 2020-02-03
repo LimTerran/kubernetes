@@ -49,11 +49,16 @@ func bootstrapOnce() {
 	if err != nil {
 		framework.Failf("Failed to get nodes: %v", err)
 	}
-	TestContext = VSphereContext{NodeMapper: &NodeMapper{}, VSphereInstances: vsphereInstances}
+	TestContext = Context{NodeMapper: &NodeMapper{}, VSphereInstances: vsphereInstances}
 	// 3. Get Node to VSphere mapping
 	err = TestContext.NodeMapper.GenerateNodeMap(vsphereInstances, *nodeList)
 	if err != nil {
 		framework.Failf("Failed to bootstrap vSphere with error: %v", err)
+	}
+	// 4. Generate Zone to Datastore mapping
+	err = TestContext.NodeMapper.GenerateZoneToDatastoreMap()
+	if err != nil {
+		framework.Failf("Failed to generate zone to datastore mapping with error: %v", err)
 	}
 	close(waiting)
 }

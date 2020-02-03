@@ -17,6 +17,7 @@ limitations under the License.
 package podautoscaler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,7 +30,7 @@ import (
 
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2beta1"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta/testrestmapper"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -50,16 +51,16 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	_ "k8s.io/kubernetes/pkg/apis/apps/install"
 	_ "k8s.io/kubernetes/pkg/apis/autoscaling/install"
 	_ "k8s.io/kubernetes/pkg/apis/core/install"
-	_ "k8s.io/kubernetes/pkg/apis/extensions/install"
 )
 
-func (w fakeResponseWrapper) DoRaw() ([]byte, error) {
+func (w fakeResponseWrapper) DoRaw(context.Context) ([]byte, error) {
 	return w.raw, nil
 }
 
-func (w fakeResponseWrapper) Stream() (io.ReadCloser, error) {
+func (w fakeResponseWrapper) Stream(context.Context) (io.ReadCloser, error) {
 	return nil, nil
 }
 
@@ -98,7 +99,10 @@ type legacyTestCase struct {
 	resource *fakeResource
 
 	// Last scale time
-	lastScaleTime *metav1.Time
+	lastScaleTime   *metav1.Time
+	recommendations []timestampedRecommendation
+
+	finished bool
 }
 
 // Needs to be called under a lock.
@@ -178,7 +182,7 @@ func (tc *legacyTestCase) prepareTestClient(t *testing.T) (*fake.Clientset, *sca
 				{
 					Type: autoscalingv2.ResourceMetricSourceType,
 					Resource: &autoscalingv2.ResourceMetricSource{
-						Name: v1.ResourceCPU,
+						Name:                     v1.ResourceCPU,
 						TargetAverageUtilization: &tc.CPUTarget,
 					},
 				},
@@ -329,19 +333,22 @@ func (tc *legacyTestCase) prepareTestClient(t *testing.T) (*fake.Clientset, *sca
 	})
 
 	fakeClient.AddReactor("update", "horizontalpodautoscalers", func(action core.Action) (handled bool, ret runtime.Object, err error) {
-		tc.Lock()
-		defer tc.Unlock()
+		obj := func() *autoscalingv1.HorizontalPodAutoscaler {
+			tc.Lock()
+			defer tc.Unlock()
 
-		obj := action.(core.UpdateAction).GetObject().(*autoscalingv1.HorizontalPodAutoscaler)
-		assert.Equal(t, namespace, obj.Namespace, "the HPA namespace should be as expected")
-		assert.Equal(t, hpaName, obj.Name, "the HPA name should be as expected")
-		assert.Equal(t, tc.desiredReplicas, obj.Status.DesiredReplicas, "the desired replica count reported in the object status should be as expected")
-		if tc.verifyCPUCurrent {
-			if assert.NotNil(t, obj.Status.CurrentCPUUtilizationPercentage, "the reported CPU utilization percentage should be non-nil") {
-				assert.Equal(t, tc.CPUCurrent, *obj.Status.CurrentCPUUtilizationPercentage, "the report CPU utilization percentage should be as expected")
+			obj := action.(core.UpdateAction).GetObject().(*autoscalingv1.HorizontalPodAutoscaler)
+			assert.Equal(t, namespace, obj.Namespace, "the HPA namespace should be as expected")
+			assert.Equal(t, hpaName, obj.Name, "the HPA name should be as expected")
+			assert.Equal(t, tc.desiredReplicas, obj.Status.DesiredReplicas, "the desired replica count reported in the object status should be as expected")
+			if tc.verifyCPUCurrent {
+				if assert.NotNil(t, obj.Status.CurrentCPUUtilizationPercentage, "the reported CPU utilization percentage should be non-nil") {
+					assert.Equal(t, tc.CPUCurrent, *obj.Status.CurrentCPUUtilizationPercentage, "the report CPU utilization percentage should be as expected")
+				}
 			}
-		}
-		tc.statusUpdated = true
+			tc.statusUpdated = true
+			return obj
+		}()
 		// Every time we reconcile HPA object we are updating status.
 		tc.processed <- obj.Name
 		return true, obj, nil
@@ -461,13 +468,19 @@ func (tc *legacyTestCase) verifyResults(t *testing.T) {
 func (tc *legacyTestCase) runTest(t *testing.T) {
 	testClient, testScaleClient := tc.prepareTestClient(t)
 	metricsClient := metrics.NewHeapsterMetricsClient(testClient, metrics.DefaultHeapsterNamespace, metrics.DefaultHeapsterScheme, metrics.DefaultHeapsterService, metrics.DefaultHeapsterPort)
-
 	eventClient := &fake.Clientset{}
 	eventClient.AddReactor("*", "events", func(action core.Action) (handled bool, ret runtime.Object, err error) {
 		tc.Lock()
 		defer tc.Unlock()
 
-		obj := action.(core.CreateAction).GetObject().(*v1.Event)
+		if tc.finished {
+			return true, &v1.Event{}, nil
+		}
+		create, ok := action.(core.CreateAction)
+		if !ok {
+			return false, nil, nil
+		}
+		obj := create.GetObject().(*v1.Event)
 		if tc.verifyEvents {
 			switch obj.Reason {
 			case "SuccessfulRescale":
@@ -489,9 +502,9 @@ func (tc *legacyTestCase) runTest(t *testing.T) {
 	defaultDownscaleStabilisationWindow := 5 * time.Minute
 
 	hpaController := NewHorizontalController(
-		eventClient.Core(),
+		eventClient.CoreV1(),
 		testScaleClient,
-		testClient.Autoscaling(),
+		testClient.AutoscalingV1(),
 		testrestmapper.TestOnlyStaticRESTMapper(legacyscheme.Scheme),
 		metricsClient,
 		informerFactory.Autoscaling().V1().HorizontalPodAutoscalers(),
@@ -504,12 +517,19 @@ func (tc *legacyTestCase) runTest(t *testing.T) {
 	)
 	hpaController.hpaListerSynced = alwaysReady
 
+	if tc.recommendations != nil {
+		hpaController.recommendations["test-namespace/test-hpa"] = tc.recommendations
+	}
+
 	stop := make(chan struct{})
 	defer close(stop)
 	informerFactory.Start(stop)
 	go hpaController.Run(stop)
 
+	// Wait for HPA to be processed.
+	<-tc.processed
 	tc.Lock()
+	tc.finished = true
 	if tc.verifyEvents {
 		tc.Unlock()
 		// We need to wait for events to be broadcasted (sleep for longer than record.sleepDuration).
@@ -517,9 +537,8 @@ func (tc *legacyTestCase) runTest(t *testing.T) {
 	} else {
 		tc.Unlock()
 	}
-	// Wait for HPA to be processed.
-	<-tc.processed
 	tc.verifyResults(t)
+
 }
 
 func TestLegacyScaleUp(t *testing.T) {
@@ -583,7 +602,7 @@ func TestLegacyScaleUpDeployment(t *testing.T) {
 		useMetricsAPI:       true,
 		resource: &fakeResource{
 			name:       "test-dep",
-			apiVersion: "extensions/v1beta1",
+			apiVersion: "apps/v1",
 			kind:       "Deployment",
 		},
 	}
@@ -603,7 +622,7 @@ func TestLegacyScaleUpReplicaSet(t *testing.T) {
 		useMetricsAPI:       true,
 		resource: &fakeResource{
 			name:       "test-replicaset",
-			apiVersion: "extensions/v1beta1",
+			apiVersion: "apps/v1",
 			kind:       "ReplicaSet",
 		},
 	}
@@ -689,6 +708,7 @@ func TestLegacyScaleDown(t *testing.T) {
 		reportedLevels:      []uint64{100, 300, 500, 250, 250},
 		reportedCPURequests: []resource.Quantity{resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0")},
 		useMetricsAPI:       true,
+		recommendations:     []timestampedRecommendation{},
 	}
 	tc.runTest(t)
 }
@@ -711,6 +731,7 @@ func TestLegacyScaleDownCM(t *testing.T) {
 		},
 		reportedLevels:      []uint64{12, 12, 12, 12, 12},
 		reportedCPURequests: []resource.Quantity{resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0")},
+		recommendations:     []timestampedRecommendation{},
 	}
 	tc.runTest(t)
 }
@@ -728,6 +749,7 @@ func TestLegacyScaleDownIgnoresUnreadyPods(t *testing.T) {
 		reportedCPURequests:  []resource.Quantity{resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0"), resource.MustParse("1.0")},
 		useMetricsAPI:        true,
 		reportedPodReadiness: []v1.ConditionStatus{v1.ConditionTrue, v1.ConditionTrue, v1.ConditionTrue, v1.ConditionFalse, v1.ConditionFalse},
+		recommendations:      []timestampedRecommendation{},
 	}
 	tc.runTest(t)
 }

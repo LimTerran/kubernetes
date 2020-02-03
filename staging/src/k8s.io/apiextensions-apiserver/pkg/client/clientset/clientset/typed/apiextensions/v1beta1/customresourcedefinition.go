@@ -19,6 +19,9 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
+	"time"
+
 	v1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	scheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -66,29 +69,39 @@ func (c *customResourceDefinitions) Get(name string, options v1.GetOptions) (res
 		Resource("customresourcedefinitions").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // List takes label and field selectors, and returns the list of CustomResourceDefinitions that match those selectors.
 func (c *customResourceDefinitions) List(opts v1.ListOptions) (result *v1beta1.CustomResourceDefinitionList, err error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	result = &v1beta1.CustomResourceDefinitionList{}
 	err = c.client.Get().
 		Resource("customresourcedefinitions").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Do().
+		Timeout(timeout).
+		Do(context.TODO()).
 		Into(result)
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested customResourceDefinitions.
 func (c *customResourceDefinitions) Watch(opts v1.ListOptions) (watch.Interface, error) {
+	var timeout time.Duration
+	if opts.TimeoutSeconds != nil {
+		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
+	}
 	opts.Watch = true
 	return c.client.Get().
 		Resource("customresourcedefinitions").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Watch()
+		Timeout(timeout).
+		Watch(context.TODO())
 }
 
 // Create takes the representation of a customResourceDefinition and creates it.  Returns the server's representation of the customResourceDefinition, and an error, if there is any.
@@ -97,7 +110,7 @@ func (c *customResourceDefinitions) Create(customResourceDefinition *v1beta1.Cus
 	err = c.client.Post().
 		Resource("customresourcedefinitions").
 		Body(customResourceDefinition).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -109,7 +122,7 @@ func (c *customResourceDefinitions) Update(customResourceDefinition *v1beta1.Cus
 		Resource("customresourcedefinitions").
 		Name(customResourceDefinition.Name).
 		Body(customResourceDefinition).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -124,7 +137,7 @@ func (c *customResourceDefinitions) UpdateStatus(customResourceDefinition *v1bet
 		Name(customResourceDefinition.Name).
 		SubResource("status").
 		Body(customResourceDefinition).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
@@ -135,17 +148,22 @@ func (c *customResourceDefinitions) Delete(name string, options *v1.DeleteOption
 		Resource("customresourcedefinitions").
 		Name(name).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *customResourceDefinitions) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
+	var timeout time.Duration
+	if listOptions.TimeoutSeconds != nil {
+		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
+	}
 	return c.client.Delete().
 		Resource("customresourcedefinitions").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
+		Timeout(timeout).
 		Body(options).
-		Do().
+		Do(context.TODO()).
 		Error()
 }
 
@@ -157,7 +175,7 @@ func (c *customResourceDefinitions) Patch(name string, pt types.PatchType, data 
 		SubResource(subresources...).
 		Name(name).
 		Body(data).
-		Do().
+		Do(context.TODO()).
 		Into(result)
 	return
 }
