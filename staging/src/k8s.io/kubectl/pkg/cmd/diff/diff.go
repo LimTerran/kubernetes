@@ -56,7 +56,18 @@ var (
 
 		KUBECTL_EXTERNAL_DIFF environment variable can be used to select your own
 		diff command. By default, the "diff" command available in your path will be
-		run with "-u" (unified diff) and "-N" (treat absent files as empty) options.`))
+		run with "-u" (unified diff) and "-N" (treat absent files as empty) options.
+
+		Exit status:
+		 0
+		No differences were found.
+		 1
+		Differences were found.
+		 >1
+		Kubectl or diff failed with an error.
+
+		Note: KUBECTL_EXTERNAL_DIFF, if used, is expected to follow that convention.`))
+
 	diffExample = templates.Examples(i18n.T(`
 		# Diff resources included in pod.json.
 		kubectl diff -f pod.json
@@ -81,6 +92,7 @@ type DiffOptions struct {
 	FilenameOptions resource.FilenameOptions
 
 	ServerSideApply bool
+	FieldManager    string
 	ForceConflicts  bool
 
 	OpenAPISchema    openapi.Resources
@@ -285,6 +297,7 @@ type InfoObject struct {
 	OpenAPI         openapi.Resources
 	Force           bool
 	ServerSideApply bool
+	FieldManager    string
 	ForceConflicts  bool
 	genericclioptions.IOStreams
 }
@@ -305,8 +318,9 @@ func (obj InfoObject) Merged() (runtime.Object, error) {
 			return nil, err
 		}
 		options := metav1.PatchOptions{
-			Force:  &obj.ForceConflicts,
-			DryRun: []string{metav1.DryRunAll},
+			Force:        &obj.ForceConflicts,
+			FieldManager: obj.FieldManager,
+			DryRun:       []string{metav1.DryRunAll},
 		}
 		return resource.NewHelper(obj.Info.Client, obj.Info.Mapping).Patch(
 			obj.Info.Namespace,
@@ -430,6 +444,7 @@ func (o *DiffOptions) Complete(f cmdutil.Factory, cmd *cobra.Command) error {
 	}
 
 	o.ServerSideApply = cmdutil.GetServerSideApplyFlag(cmd)
+	o.FieldManager = cmdutil.GetFieldManagerFlag(cmd)
 	o.ForceConflicts = cmdutil.GetForceConflictsFlag(cmd)
 	if o.ForceConflicts && !o.ServerSideApply {
 		return fmt.Errorf("--force-conflicts only works with --server-side")
@@ -518,6 +533,7 @@ func (o *DiffOptions) Run() error {
 				OpenAPI:         o.OpenAPISchema,
 				Force:           force,
 				ServerSideApply: o.ServerSideApply,
+				FieldManager:    o.FieldManager,
 				ForceConflicts:  o.ForceConflicts,
 				IOStreams:       o.Diff.IOStreams,
 			}

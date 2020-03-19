@@ -39,8 +39,6 @@ import (
 
 	"golang.org/x/net/websocket"
 
-	"k8s.io/klog"
-
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	gomegatypes "github.com/onsi/gomega/types"
@@ -52,7 +50,6 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -61,7 +58,6 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	restclient "k8s.io/client-go/rest"
-	scaleclient "k8s.io/client-go/scale"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	watchtools "k8s.io/client-go/tools/watch"
@@ -79,7 +75,6 @@ import (
 	e2emetrics "k8s.io/kubernetes/test/e2e/framework/metrics"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
-	e2eresource "k8s.io/kubernetes/test/e2e/framework/resource"
 	e2essh "k8s.io/kubernetes/test/e2e/framework/ssh"
 )
 
@@ -87,8 +82,6 @@ const (
 	// PodListTimeout is how long to wait for the pod to be listable.
 	PodListTimeout = time.Minute
 	// PodStartTimeout is how long to wait for the pod to be started.
-	// Initial pod start can be delayed O(minutes) by slow docker pulls.
-	// TODO: Make this 30 seconds once #4566 is resolved.
 	PodStartTimeout = 5 * time.Minute
 
 	// PodStartShortTimeout is same as `PodStartTimeout` to wait for the pod to be started, but shorter.
@@ -104,12 +97,6 @@ const (
 
 	// PodEventTimeout is how much we wait for a pod event to occur.
 	PodEventTimeout = 2 * time.Minute
-
-	// NamespaceCleanupTimeout is how long to wait for the namespace to be deleted.
-	// If there are any orphaned namespaces to clean up, this test is running
-	// on a long lived cluster. A long wait here is preferably to spurious test
-	// failures caused by leaked resources from a previous test run.
-	NamespaceCleanupTimeout = 15 * time.Minute
 
 	// ServiceStartTimeout is how long to wait for a service endpoint to be resolvable.
 	ServiceStartTimeout = 3 * time.Minute
@@ -127,7 +114,6 @@ const (
 
 	// SingleCallTimeout is how long to try single API calls (like 'get' or 'list'). Used to prevent
 	// transient failures from failing tests.
-	// TODO: client should not apply this timeout to Watch calls. Increased from 30s until that is fixed.
 	SingleCallTimeout = 5 * time.Minute
 
 	// NodeReadyInitialTimeout is how long nodes have to be "ready" when a test begins. They should already
@@ -141,12 +127,8 @@ const (
 	// Use it case by case when we are sure this timeout is enough.
 	ClaimProvisionShortTimeout = 1 * time.Minute
 
-	// ClaimDeletingTimeout is How long claims have to become deleted.
-	ClaimDeletingTimeout = 3 * time.Minute
-
-	// RecreateNodeReadyAgainTimeout is how long a node is allowed to become "Ready" after it is recreated before
-	// the test is considered failed.
-	RecreateNodeReadyAgainTimeout = 10 * time.Minute
+	// ClaimProvisionTimeout is how long claims have to become dynamically provisioned.
+	ClaimProvisionTimeout = 5 * time.Minute
 
 	// RestartNodeReadyAgainTimeout is how long a node is allowed to become "Ready" after it is restarted before
 	// the test is considered failed.
@@ -159,10 +141,6 @@ const (
 	// SnapshotCreateTimeout is how long for snapshot to create snapshotContent.
 	SnapshotCreateTimeout = 5 * time.Minute
 
-	// Number of objects that gc can delete in a second.
-	// GC issues 2 requestes for single delete.
-	gcThroughput = 10
-
 	// Minimal number of nodes for the cluster to be considered large.
 	largeClusterThreshold = 100
 
@@ -174,9 +152,6 @@ const (
 )
 
 var (
-	// ClaimProvisionTimeout is how long claims have to become dynamically provisioned.
-	ClaimProvisionTimeout = 5 * time.Minute
-
 	// BusyBoxImage is the image URI of BusyBox.
 	BusyBoxImage = imageutils.GetE2EImage(imageutils.BusyBox)
 
@@ -202,26 +177,6 @@ func GetMasterHost() string {
 	masterURL, err := url.Parse(TestContext.Host)
 	ExpectNoError(err)
 	return masterURL.Hostname()
-}
-
-// RunIfContainerRuntimeIs runs if the container runtime is included in the runtimes.
-func RunIfContainerRuntimeIs(runtimes ...string) {
-	for _, containerRuntime := range runtimes {
-		if containerRuntime == TestContext.ContainerRuntime {
-			return
-		}
-	}
-	skipInternalf(1, "Skipped because container runtime %q is not in %s", TestContext.ContainerRuntime, runtimes)
-}
-
-// RunIfSystemSpecNameIs runs if the system spec name is included in the names.
-func RunIfSystemSpecNameIs(names ...string) {
-	for _, name := range names {
-		if name == TestContext.SystemSpecName {
-			return
-		}
-	}
-	skipInternalf(1, "Skipped because system spec name %q is not in %v", TestContext.SystemSpecName, names)
 }
 
 // ProviderIs returns true if the provider is included is the providers. Otherwise false.
@@ -259,7 +214,7 @@ func NodeOSDistroIs(supportedNodeOsDistros ...string) bool {
 // Returns the list of deleted namespaces or an error.
 func DeleteNamespaces(c clientset.Interface, deleteFilter, skipFilter []string) ([]string, error) {
 	ginkgo.By("Deleting namespaces")
-	nsList, err := c.CoreV1().Namespaces().List(metav1.ListOptions{})
+	nsList, err := c.CoreV1().Namespaces().List(context.TODO(), metav1.ListOptions{})
 	ExpectNoError(err, "Failed to get namespace list")
 	var deleted []string
 	var wg sync.WaitGroup
@@ -289,7 +244,7 @@ OUTER:
 		go func(nsName string) {
 			defer wg.Done()
 			defer ginkgo.GinkgoRecover()
-			gomega.Expect(c.CoreV1().Namespaces().Delete(nsName, nil)).To(gomega.Succeed())
+			gomega.Expect(c.CoreV1().Namespaces().Delete(context.TODO(), nsName, metav1.DeleteOptions{})).To(gomega.Succeed())
 			Logf("namespace : %v api call to delete is complete ", nsName)
 		}(item.Name)
 	}
@@ -307,7 +262,7 @@ func WaitForNamespacesDeleted(c clientset.Interface, namespaces []string, timeou
 	//Now POLL until all namespaces have been eradicated.
 	return wait.Poll(2*time.Second, timeout,
 		func() (bool, error) {
-			nsList, err := c.CoreV1().Namespaces().List(metav1.ListOptions{})
+			nsList, err := c.CoreV1().Namespaces().List(context.TODO(), metav1.ListOptions{})
 			if err != nil {
 				return false, err
 			}
@@ -321,7 +276,7 @@ func WaitForNamespacesDeleted(c clientset.Interface, namespaces []string, timeou
 }
 
 func waitForServiceAccountInNamespace(c clientset.Interface, ns, serviceAccountName string, timeout time.Duration) error {
-	w, err := c.CoreV1().ServiceAccounts(ns).Watch(metav1.SingleObject(metav1.ObjectMeta{Name: serviceAccountName}))
+	w, err := c.CoreV1().ServiceAccounts(ns).Watch(context.TODO(), metav1.SingleObject(metav1.ObjectMeta{Name: serviceAccountName}))
 	if err != nil {
 		return err
 	}
@@ -342,7 +297,7 @@ func WaitForDefaultServiceAccountInNamespace(c clientset.Interface, namespace st
 func WaitForPersistentVolumeDeleted(c clientset.Interface, pvName string, Poll, timeout time.Duration) error {
 	Logf("Waiting up to %v for PersistentVolume %s to get deleted", timeout, pvName)
 	for start := time.Now(); time.Since(start) < timeout; time.Sleep(Poll) {
-		pv, err := c.CoreV1().PersistentVolumes().Get(pvName, metav1.GetOptions{})
+		pv, err := c.CoreV1().PersistentVolumes().Get(context.TODO(), pvName, metav1.GetOptions{})
 		if err == nil {
 			Logf("PersistentVolume %s found and phase=%s (%v)", pvName, pv.Status.Phase, time.Since(start))
 			continue
@@ -361,7 +316,7 @@ func findAvailableNamespaceName(baseName string, c clientset.Interface) (string,
 	var name string
 	err := wait.PollImmediate(Poll, 30*time.Second, func() (bool, error) {
 		name = fmt.Sprintf("%v-%v", baseName, RandomSuffix())
-		_, err := c.CoreV1().Namespaces().Get(name, metav1.GetOptions{})
+		_, err := c.CoreV1().Namespaces().Get(context.TODO(), name, metav1.GetOptions{})
 		if err == nil {
 			// Already taken
 			return false, nil
@@ -403,7 +358,7 @@ func CreateTestingNS(baseName string, c clientset.Interface, labels map[string]s
 	var got *v1.Namespace
 	if err := wait.PollImmediate(Poll, 30*time.Second, func() (bool, error) {
 		var err error
-		got, err = c.CoreV1().Namespaces().Create(namespaceObj)
+		got, err = c.CoreV1().Namespaces().Create(context.TODO(), namespaceObj, metav1.CreateOptions{})
 		if err != nil {
 			Logf("Unexpected error while creating namespace: %v", err)
 			return false, nil
@@ -442,7 +397,7 @@ func CheckTestingNSDeletedExcept(c clientset.Interface, skip string) error {
 
 	Logf("Waiting for terminating namespaces to be deleted...")
 	for start := time.Now(); time.Since(start) < timeout; time.Sleep(15 * time.Second) {
-		namespaces, err := c.CoreV1().Namespaces().List(metav1.ListOptions{})
+		namespaces, err := c.CoreV1().Namespaces().List(context.TODO(), metav1.ListOptions{})
 		if err != nil {
 			Logf("Listing namespaces failed: %v", err)
 			continue
@@ -466,7 +421,7 @@ func CheckTestingNSDeletedExcept(c clientset.Interface, skip string) error {
 // WaitForService waits until the service appears (exist == true), or disappears (exist == false)
 func WaitForService(c clientset.Interface, namespace, name string, exist bool, interval, timeout time.Duration) error {
 	err := wait.PollImmediate(interval, timeout, func() (bool, error) {
-		_, err := c.CoreV1().Services(namespace).Get(name, metav1.GetOptions{})
+		_, err := c.CoreV1().Services(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 		switch {
 		case err == nil:
 			Logf("Service %s in namespace %s found.", name, namespace)
@@ -493,7 +448,7 @@ func WaitForService(c clientset.Interface, namespace, name string, exist bool, i
 func WaitForServiceEndpointsNum(c clientset.Interface, namespace, serviceName string, expectNum int, interval, timeout time.Duration) error {
 	return wait.Poll(interval, timeout, func() (bool, error) {
 		Logf("Waiting for amount of service:%s endpoints to be %d", serviceName, expectNum)
-		list, err := c.CoreV1().Endpoints(namespace).List(metav1.ListOptions{})
+		list, err := c.CoreV1().Endpoints(namespace).List(context.TODO(), metav1.ListOptions{})
 		if err != nil {
 			return false, err
 		}
@@ -629,7 +584,7 @@ func AssertCleanup(ns string, selectors ...string) {
 // executed in a specific pod container.
 // TODO(alejandrox1): move to pod/ subpkg once kubectl methods are refactored.
 func LookForStringInPodExec(ns, podName string, command []string, expectedString string, timeout time.Duration) (result string, err error) {
-	return LookForString(expectedString, timeout, func() string {
+	return lookForString(expectedString, timeout, func() string {
 		// use the first container
 		args := []string{"exec", podName, fmt.Sprintf("--namespace=%v", ns), "--"}
 		args = append(args, command...)
@@ -637,11 +592,11 @@ func LookForStringInPodExec(ns, podName string, command []string, expectedString
 	})
 }
 
-// LookForString looks for the given string in the output of fn, repeatedly calling fn until
+// lookForString looks for the given string in the output of fn, repeatedly calling fn until
 // the timeout is reached or the string is found. Returns last log and possibly
 // error if the string was not found.
 // TODO(alejandrox1): move to pod/ subpkg once kubectl methods are refactored.
-func LookForString(expectedString string, timeout time.Duration, fn func() string) (result string, err error) {
+func lookForString(expectedString string, timeout time.Duration, fn func() string) (result string, err error) {
 	for t := time.Now(); time.Since(t) < timeout; time.Sleep(Poll) {
 		result = fn()
 		if strings.Contains(result, expectedString) {
@@ -850,14 +805,14 @@ func (f *Framework) MatchContainerOutput(
 	createdPod := podClient.Create(pod)
 	defer func() {
 		ginkgo.By("delete the pod")
-		podClient.DeleteSync(createdPod.Name, &metav1.DeleteOptions{}, DefaultPodDeletionTimeout)
+		podClient.DeleteSync(createdPod.Name, metav1.DeleteOptions{}, DefaultPodDeletionTimeout)
 	}()
 
 	// Wait for client pod to complete.
 	podErr := e2epod.WaitForPodSuccessInNamespace(f.ClientSet, createdPod.Name, ns)
 
 	// Grab its logs.  Get host first.
-	podStatus, err := podClient.Get(createdPod.Name, metav1.GetOptions{})
+	podStatus, err := podClient.Get(context.TODO(), createdPod.Name, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get pod status: %v", err)
 	}
@@ -927,7 +882,7 @@ func dumpEventsInNamespace(eventsLister EventsLister, namespace string) {
 // DumpAllNamespaceInfo dumps events, pods and nodes information in the given namespace.
 func DumpAllNamespaceInfo(c clientset.Interface, namespace string) {
 	dumpEventsInNamespace(func(opts metav1.ListOptions, ns string) (*v1.EventList, error) {
-		return c.CoreV1().Events(ns).List(opts)
+		return c.CoreV1().Events(ns).List(context.TODO(), opts)
 	}, namespace)
 
 	e2epod.DumpAllPodInfoForNamespace(c, namespace)
@@ -937,7 +892,7 @@ func DumpAllNamespaceInfo(c clientset.Interface, namespace string) {
 	// 2. there are so many of them that working with them are mostly impossible
 	// So we dump them only if the cluster is relatively small.
 	maxNodesForDump := TestContext.MaxNodesToGather
-	nodes, err := c.CoreV1().Nodes().List(metav1.ListOptions{})
+	nodes, err := c.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		Logf("unable to fetch node list: %v", err)
 		return
@@ -974,7 +929,7 @@ func dumpAllNodeInfo(c clientset.Interface, nodes *v1.NodeList) {
 func DumpNodeDebugInfo(c clientset.Interface, nodeNames []string, logFunc func(fmt string, args ...interface{})) {
 	for _, n := range nodeNames {
 		logFunc("\nLogging node info for node %v", n)
-		node, err := c.CoreV1().Nodes().Get(n, metav1.GetOptions{})
+		node, err := c.CoreV1().Nodes().Get(context.TODO(), n, metav1.GetOptions{})
 		if err != nil {
 			logFunc("Error getting node info %v", err)
 		}
@@ -1045,7 +1000,7 @@ func getNodeEvents(c clientset.Interface, nodeName string) []v1.Event {
 		"source":                   "kubelet",
 	}.AsSelector().String()
 	options := metav1.ListOptions{FieldSelector: selector}
-	events, err := c.CoreV1().Events(metav1.NamespaceSystem).List(options)
+	events, err := c.CoreV1().Events(metav1.NamespaceSystem).List(context.TODO(), options)
 	if err != nil {
 		Logf("Unexpected error retrieving node events %v", err)
 		return []v1.Event{}
@@ -1065,43 +1020,6 @@ func WaitForAllNodesSchedulable(c clientset.Interface, timeout time.Duration) er
 	)
 }
 
-// GetPodSecretUpdateTimeout reuturns the timeout duration for updating pod secret.
-func GetPodSecretUpdateTimeout(c clientset.Interface) time.Duration {
-	// With SecretManager(ConfigMapManager), we may have to wait up to full sync period +
-	// TTL of secret(configmap) to elapse before the Kubelet projects the update into the
-	// volume and the container picks it up.
-	// So this timeout is based on default Kubelet sync period (1 minute) + maximum TTL for
-	// secret(configmap) that's based on cluster size + additional time as a fudge factor.
-	secretTTL, err := getNodeTTLAnnotationValue(c)
-	if err != nil {
-		Logf("Couldn't get node TTL annotation (using default value of 0): %v", err)
-	}
-	podLogTimeout := 240*time.Second + secretTTL
-	return podLogTimeout
-}
-
-func getNodeTTLAnnotationValue(c clientset.Interface) (time.Duration, error) {
-	nodes, err := c.CoreV1().Nodes().List(metav1.ListOptions{})
-	if err != nil || len(nodes.Items) == 0 {
-		return time.Duration(0), fmt.Errorf("Couldn't list any nodes to get TTL annotation: %v", err)
-	}
-	// Since TTL the kubelet is using is stored in node object, for the timeout
-	// purpose we take it from the first node (all of them should be the same).
-	node := &nodes.Items[0]
-	if node.Annotations == nil {
-		return time.Duration(0), fmt.Errorf("No annotations found on the node")
-	}
-	value, ok := node.Annotations[v1.ObjectTTLAnnotationKey]
-	if !ok {
-		return time.Duration(0), fmt.Errorf("No TTL annotation found on the node")
-	}
-	intValue, err := strconv.Atoi(value)
-	if err != nil {
-		return time.Duration(0), fmt.Errorf("Cannot convert TTL annotation from %#v to int", *node)
-	}
-	return time.Duration(intValue) * time.Second, nil
-}
-
 // AddOrUpdateLabelOnNode adds the given label key and value to the given node or updates value.
 func AddOrUpdateLabelOnNode(c clientset.Interface, nodeName string, labelKey, labelValue string) {
 	ExpectNoError(testutils.AddLabelsToNode(c, nodeName, map[string]string{labelKey: labelValue}))
@@ -1110,7 +1028,7 @@ func AddOrUpdateLabelOnNode(c clientset.Interface, nodeName string, labelKey, la
 // ExpectNodeHasLabel expects that the given node has the given label pair.
 func ExpectNodeHasLabel(c clientset.Interface, nodeName string, labelKey string, labelValue string) {
 	ginkgo.By("verifying the node has the label " + labelKey + " " + labelValue)
-	node, err := c.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+	node, err := c.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	ExpectNoError(err)
 	ExpectEqual(node.Labels[labelKey], labelValue)
 }
@@ -1138,7 +1056,7 @@ func RemoveLabelOffNode(c clientset.Interface, nodeName string, labelKey string)
 
 func verifyThatTaintIsGone(c clientset.Interface, nodeName string, taint *v1.Taint) {
 	ginkgo.By("verifying the node doesn't have the taint " + taint.ToString())
-	nodeUpdated, err := c.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+	nodeUpdated, err := c.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	ExpectNoError(err)
 	if taintutils.TaintExists(nodeUpdated.Spec.Taints, taint) {
 		Failf("Failed removing taint " + taint.ToString() + " of the node " + nodeName)
@@ -1156,7 +1074,7 @@ func ExpectNodeHasTaint(c clientset.Interface, nodeName string, taint *v1.Taint)
 
 // NodeHasTaint returns true if the node has the given taint, else returns false.
 func NodeHasTaint(c clientset.Interface, nodeName string, taint *v1.Taint) (bool, error) {
-	node, err := c.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+	node, err := c.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	if err != nil {
 		return false, err
 	}
@@ -1167,139 +1085,6 @@ func NodeHasTaint(c clientset.Interface, nodeName string, taint *v1.Taint) (bool
 		return false, nil
 	}
 	return true, nil
-}
-
-// ScaleResource scales resource to the given size.
-func ScaleResource(
-	clientset clientset.Interface,
-	scalesGetter scaleclient.ScalesGetter,
-	ns, name string,
-	size uint,
-	wait bool,
-	kind schema.GroupKind,
-	gvr schema.GroupVersionResource,
-) error {
-	ginkgo.By(fmt.Sprintf("Scaling %v %s in namespace %s to %d", kind, name, ns, size))
-	if err := testutils.ScaleResourceWithRetries(scalesGetter, ns, name, size, gvr); err != nil {
-		return fmt.Errorf("error while scaling RC %s to %d replicas: %v", name, size, err)
-	}
-	if !wait {
-		return nil
-	}
-	return e2epod.WaitForControlledPodsRunning(clientset, ns, name, kind)
-}
-
-// DeleteResourceAndWaitForGC deletes only given resource and waits for GC to delete the pods.
-func DeleteResourceAndWaitForGC(c clientset.Interface, kind schema.GroupKind, ns, name string) error {
-	ginkgo.By(fmt.Sprintf("deleting %v %s in namespace %s, will wait for the garbage collector to delete the pods", kind, name, ns))
-
-	rtObject, err := e2eresource.GetRuntimeObjectForKind(c, kind, ns, name)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			Logf("%v %s not found: %v", kind, name, err)
-			return nil
-		}
-		return err
-	}
-	selector, err := e2eresource.GetSelectorFromRuntimeObject(rtObject)
-	if err != nil {
-		return err
-	}
-	replicas, err := e2eresource.GetReplicasFromRuntimeObject(rtObject)
-	if err != nil {
-		return err
-	}
-
-	ps, err := testutils.NewPodStore(c, ns, selector, fields.Everything())
-	if err != nil {
-		return err
-	}
-
-	defer ps.Stop()
-	falseVar := false
-	deleteOption := &metav1.DeleteOptions{OrphanDependents: &falseVar}
-	startTime := time.Now()
-	if err := testutils.DeleteResourceWithRetries(c, kind, ns, name, deleteOption); err != nil {
-		return err
-	}
-	deleteTime := time.Since(startTime)
-	Logf("Deleting %v %s took: %v", kind, name, deleteTime)
-
-	var interval, timeout time.Duration
-	switch {
-	case replicas < 100:
-		interval = 100 * time.Millisecond
-	case replicas < 1000:
-		interval = 1 * time.Second
-	default:
-		interval = 10 * time.Second
-	}
-	if replicas < 5000 {
-		timeout = 10 * time.Minute
-	} else {
-		timeout = time.Duration(replicas/gcThroughput) * time.Second
-		// gcThroughput is pretty strict now, add a bit more to it
-		timeout = timeout + 3*time.Minute
-	}
-
-	err = waitForPodsInactive(ps, interval, timeout)
-	if err != nil {
-		return fmt.Errorf("error while waiting for pods to become inactive %s: %v", name, err)
-	}
-	terminatePodTime := time.Since(startTime) - deleteTime
-	Logf("Terminating %v %s pods took: %v", kind, name, terminatePodTime)
-
-	// In gce, at any point, small percentage of nodes can disappear for
-	// ~10 minutes due to hostError. 20 minutes should be long enough to
-	// restart VM in that case and delete the pod.
-	err = waitForPodsGone(ps, interval, 20*time.Minute)
-	if err != nil {
-		return fmt.Errorf("error while waiting for pods gone %s: %v", name, err)
-	}
-	return nil
-}
-
-// waitForPodsGone waits until there are no pods left in the PodStore.
-func waitForPodsGone(ps *testutils.PodStore, interval, timeout time.Duration) error {
-	var pods []*v1.Pod
-	err := wait.PollImmediate(interval, timeout, func() (bool, error) {
-		if pods = ps.List(); len(pods) == 0 {
-			return true, nil
-		}
-		return false, nil
-	})
-
-	if err == wait.ErrWaitTimeout {
-		for _, pod := range pods {
-			Logf("ERROR: Pod %q still exists. Node: %q", pod.Name, pod.Spec.NodeName)
-		}
-		return fmt.Errorf("there are %d pods left. E.g. %q on node %q", len(pods), pods[0].Name, pods[0].Spec.NodeName)
-	}
-	return err
-}
-
-// waitForPodsInactive waits until there are no active pods left in the PodStore.
-// This is to make a fair comparison of deletion time between DeleteRCAndPods
-// and DeleteRCAndWaitForGC, because the RC controller decreases status.replicas
-// when the pod is inactvie.
-func waitForPodsInactive(ps *testutils.PodStore, interval, timeout time.Duration) error {
-	var activePods []*v1.Pod
-	err := wait.PollImmediate(interval, timeout, func() (bool, error) {
-		pods := ps.List()
-		activePods = controller.FilterActivePods(pods)
-		if len(activePods) != 0 {
-			return false, nil
-		}
-		return true, nil
-	})
-
-	if err == wait.ErrWaitTimeout {
-		for _, pod := range activePods {
-			Logf("ERROR: Pod %q running on %q is still active", pod.Name, pod.Spec.NodeName)
-		}
-		return fmt.Errorf("there are %d active pods. E.g. %q on node %q", len(activePods), activePods[0].Name, activePods[0].Spec.NodeName)
-	}
-	return err
 }
 
 // RunHostCmd runs the given cmd in the context of the given pod using `kubectl exec`
@@ -1345,7 +1130,7 @@ func AllNodesReady(c clientset.Interface, timeout time.Duration) error {
 	err := wait.PollImmediate(Poll, timeout, func() (bool, error) {
 		notReady = nil
 		// It should be OK to list unschedulable Nodes here.
-		nodes, err := c.CoreV1().Nodes().List(metav1.ListOptions{})
+		nodes, err := c.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
 		if err != nil {
 			if testutils.IsRetryableAPIError(err) {
 				return false, nil
@@ -1491,7 +1276,7 @@ func waitForApiserverRestarted(c clientset.Interface, initialRestartCount int32)
 func getApiserverRestartCount(c clientset.Interface) (int32, error) {
 	label := labels.SelectorFromSet(labels.Set(map[string]string{"component": "kube-apiserver"}))
 	listOpts := metav1.ListOptions{LabelSelector: label.String()}
-	pods, err := c.CoreV1().Pods(metav1.NamespaceSystem).List(listOpts)
+	pods, err := c.CoreV1().Pods(metav1.NamespaceSystem).List(context.TODO(), listOpts)
 	if err != nil {
 		return -1, err
 	}
@@ -1558,7 +1343,11 @@ func headersForConfig(c *restclient.Config, url *url.URL) (http.Header, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := rt.RoundTrip(&http.Request{URL: url}); err != nil {
+	request, err := http.NewRequest("GET", url.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := rt.RoundTrip(request); err != nil {
 		return nil, err
 	}
 	return extract.Header, nil
@@ -1592,7 +1381,7 @@ func OpenWebSocketForURL(url *url.URL, config *restclient.Config, protocols []st
 
 // LookForStringInLog looks for the given string in the log of a specific pod container
 func LookForStringInLog(ns, podName, container, expectedString string, timeout time.Duration) (result string, err error) {
-	return LookForString(expectedString, timeout, func() string {
+	return lookForString(expectedString, timeout, func() string {
 		return RunKubectlOrDie(ns, "logs", podName, container, fmt.Sprintf("--namespace=%v", ns))
 	})
 }
@@ -1719,72 +1508,13 @@ func RunCmdEnv(env []string, command string, args ...string) (string, string, er
 	return stdout, stderr, nil
 }
 
-// E2ETestNodePreparer implements testutils.TestNodePreparer interface, which is used
-// to create/modify Nodes before running a test.
-type E2ETestNodePreparer struct {
-	client clientset.Interface
-	// Specifies how many nodes should be modified using the given strategy.
-	// Only one strategy can be applied to a single Node, so there needs to
-	// be at least <sum_of_keys> Nodes in the cluster.
-	countToStrategy       []testutils.CountToStrategy
-	nodeToAppliedStrategy map[string]testutils.PrepareNodeStrategy
-}
-
-// PrepareNodes prepares nodes in the cluster.
-func (p *E2ETestNodePreparer) PrepareNodes() error {
-	nodes, err := e2enode.GetReadySchedulableNodes(p.client)
-	if err != nil {
-		return err
-	}
-	numTemplates := 0
-	for _, v := range p.countToStrategy {
-		numTemplates += v.Count
-	}
-	if numTemplates > len(nodes.Items) {
-		return fmt.Errorf("Can't prepare Nodes. Got more templates than existing Nodes")
-	}
-	index := 0
-	sum := 0
-	for _, v := range p.countToStrategy {
-		sum += v.Count
-		for ; index < sum; index++ {
-			if err := testutils.DoPrepareNode(p.client, &nodes.Items[index], v.Strategy); err != nil {
-				klog.Errorf("Aborting node preparation: %v", err)
-				return err
-			}
-			p.nodeToAppliedStrategy[nodes.Items[index].Name] = v.Strategy
-		}
-	}
-	return nil
-}
-
-// CleanupNodes cleanups nodes in the cluster.
-func (p *E2ETestNodePreparer) CleanupNodes() error {
-	var encounteredError error
-	nodes, err := e2enode.GetReadySchedulableNodes(p.client)
-	if err != nil {
-		return err
-	}
-	for i := range nodes.Items {
-		name := nodes.Items[i].Name
-		strategy, found := p.nodeToAppliedStrategy[name]
-		if found {
-			if err = testutils.DoCleanupNode(p.client, name, strategy); err != nil {
-				klog.Errorf("Skipping cleanup of Node: failed update of %v: %v", name, err)
-				encounteredError = err
-			}
-		}
-	}
-	return encounteredError
-}
-
 // getMasterAddresses returns the externalIP, internalIP and hostname fields of the master.
 // If any of these is unavailable, it is set to "".
 func getMasterAddresses(c clientset.Interface) (string, string, string) {
 	var externalIP, internalIP, hostname string
 
 	// Populate the internal IP.
-	eps, err := c.CoreV1().Endpoints(metav1.NamespaceDefault).Get("kubernetes", metav1.GetOptions{})
+	eps, err := c.CoreV1().Endpoints(metav1.NamespaceDefault).Get(context.TODO(), "kubernetes", metav1.GetOptions{})
 	if err != nil {
 		Failf("Failed to get kubernetes endpoints: %v", err)
 	}
@@ -1888,7 +1618,7 @@ func CreateEmptyFileOnPod(namespace string, podName string, filePath string) err
 
 // DumpDebugInfo dumps debug info of tests.
 func DumpDebugInfo(c clientset.Interface, ns string) {
-	sl, _ := c.CoreV1().Pods(ns).List(metav1.ListOptions{LabelSelector: labels.Everything().String()})
+	sl, _ := c.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.Everything().String()})
 	for _, s := range sl.Items {
 		desc, _ := RunKubectl(ns, "describe", "po", s.Name, fmt.Sprintf("--namespace=%v", ns))
 		Logf("\nOutput of kubectl describe %v:\n%v", s.Name, desc)
@@ -1900,7 +1630,6 @@ func DumpDebugInfo(c clientset.Interface, ns string) {
 
 // DsFromManifest reads a .json/yaml file and returns the daemonset in it.
 func DsFromManifest(url string) (*appsv1.DaemonSet, error) {
-	var ds appsv1.DaemonSet
 	Logf("Parsing ds from %v", url)
 
 	var response *http.Response
@@ -1926,7 +1655,12 @@ func DsFromManifest(url string) (*appsv1.DaemonSet, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Failed to read html response body: %v", err)
 	}
+	return DsFromData(data)
+}
 
+// DsFromData reads a byte slice and returns the daemonset in it.
+func DsFromData(data []byte) (*appsv1.DaemonSet, error) {
+	var ds appsv1.DaemonSet
 	dataJSON, err := utilyaml.ToJSON(data)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to parse data to json: %v", err)
@@ -1937,27 +1671,6 @@ func DsFromManifest(url string) (*appsv1.DaemonSet, error) {
 		return nil, fmt.Errorf("Failed to decode DaemonSet spec: %v", err)
 	}
 	return &ds, nil
-}
-
-// GetClusterZones returns the values of zone label collected from all nodes.
-func GetClusterZones(c clientset.Interface) (sets.String, error) {
-	nodes, err := c.CoreV1().Nodes().List(metav1.ListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("Error getting nodes while attempting to list cluster zones: %v", err)
-	}
-
-	// collect values of zone label from all nodes
-	zones := sets.NewString()
-	for _, node := range nodes.Items {
-		if zone, found := node.Labels[v1.LabelZoneFailureDomain]; found {
-			zones.Insert(zone)
-		}
-
-		if zone, found := node.Labels[v1.LabelZoneFailureDomainStable]; found {
-			zones.Insert(zone)
-		}
-	}
-	return zones, nil
 }
 
 // GetFileModeRegex returns a file mode related regex which should be matched by the mounttest pods' output.

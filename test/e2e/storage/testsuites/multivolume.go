@@ -17,6 +17,7 @@ limitations under the License.
 package testsuites
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -149,7 +150,7 @@ func (t *multiVolumeTestSuite) DefineTests(driver TestDriver, pattern testpatter
 		}
 
 		TestAccessMultipleVolumesAcrossPodRecreation(l.config.Framework, l.cs, l.ns.Name,
-			e2epod.NodeSelection{Name: l.config.ClientNodeName}, pvcs, true /* sameNode */)
+			l.config.ClientNodeSelection, pvcs, true /* sameNode */)
 	})
 
 	// This tests below configuration:
@@ -177,14 +178,13 @@ func (t *multiVolumeTestSuite) DefineTests(driver TestDriver, pattern testpatter
 		if len(nodes.Items) < 2 {
 			e2eskipper.Skipf("Number of available nodes is less than 2 - skipping")
 		}
-		if l.config.ClientNodeName != "" {
+		if l.config.ClientNodeSelection.Name != "" {
 			e2eskipper.Skipf("Driver %q requires to deploy on a specific node - skipping", l.driver.GetDriverInfo().Name)
 		}
 		// For multi-node tests there must be enough nodes with the same toopology to schedule the pods
-		nodeSelection := e2epod.NodeSelection{Name: l.config.ClientNodeName}
 		topologyKeys := dInfo.TopologyKeys
 		if len(topologyKeys) != 0 {
-			if err = ensureTopologyRequirements(&nodeSelection, nodes, l.cs, topologyKeys, 2); err != nil {
+			if err = ensureTopologyRequirements(&l.config.ClientNodeSelection, nodes, l.cs, topologyKeys, 2); err != nil {
 				framework.Failf("Error setting topology requirements: %v", err)
 			}
 		}
@@ -200,7 +200,7 @@ func (t *multiVolumeTestSuite) DefineTests(driver TestDriver, pattern testpatter
 		}
 
 		TestAccessMultipleVolumesAcrossPodRecreation(l.config.Framework, l.cs, l.ns.Name,
-			nodeSelection, pvcs, false /* sameNode */)
+			l.config.ClientNodeSelection, pvcs, false /* sameNode */)
 	})
 
 	// This tests below configuration (only <block, filesystem> pattern is tested):
@@ -239,7 +239,7 @@ func (t *multiVolumeTestSuite) DefineTests(driver TestDriver, pattern testpatter
 		}
 
 		TestAccessMultipleVolumesAcrossPodRecreation(l.config.Framework, l.cs, l.ns.Name,
-			e2epod.NodeSelection{Name: l.config.ClientNodeName}, pvcs, true /* sameNode */)
+			l.config.ClientNodeSelection, pvcs, true /* sameNode */)
 	})
 
 	// This tests below configuration (only <block, filesystem> pattern is tested):
@@ -271,14 +271,13 @@ func (t *multiVolumeTestSuite) DefineTests(driver TestDriver, pattern testpatter
 		if len(nodes.Items) < 2 {
 			e2eskipper.Skipf("Number of available nodes is less than 2 - skipping")
 		}
-		if l.config.ClientNodeName != "" {
+		if l.config.ClientNodeSelection.Name != "" {
 			e2eskipper.Skipf("Driver %q requires to deploy on a specific node - skipping", l.driver.GetDriverInfo().Name)
 		}
 		// For multi-node tests there must be enough nodes with the same toopology to schedule the pods
-		nodeSelection := e2epod.NodeSelection{Name: l.config.ClientNodeName}
 		topologyKeys := dInfo.TopologyKeys
 		if len(topologyKeys) != 0 {
-			if err = ensureTopologyRequirements(&nodeSelection, nodes, l.cs, topologyKeys, 2); err != nil {
+			if err = ensureTopologyRequirements(&l.config.ClientNodeSelection, nodes, l.cs, topologyKeys, 2); err != nil {
 				framework.Failf("Error setting topology requirements: %v", err)
 			}
 		}
@@ -299,7 +298,7 @@ func (t *multiVolumeTestSuite) DefineTests(driver TestDriver, pattern testpatter
 		}
 
 		TestAccessMultipleVolumesAcrossPodRecreation(l.config.Framework, l.cs, l.ns.Name,
-			nodeSelection, pvcs, false /* sameNode */)
+			l.config.ClientNodeSelection, pvcs, false /* sameNode */)
 	})
 
 	// This tests below configuration:
@@ -324,7 +323,7 @@ func (t *multiVolumeTestSuite) DefineTests(driver TestDriver, pattern testpatter
 
 		// Test access to the volume from pods on different node
 		TestConcurrentAccessToSingleVolume(l.config.Framework, l.cs, l.ns.Name,
-			e2epod.NodeSelection{Name: l.config.ClientNodeName}, resource.Pvc, numPods, true /* sameNode */)
+			l.config.ClientNodeSelection, resource.Pvc, numPods, true /* sameNode */)
 	})
 
 	// This tests below configuration:
@@ -348,14 +347,13 @@ func (t *multiVolumeTestSuite) DefineTests(driver TestDriver, pattern testpatter
 		if len(nodes.Items) < numPods {
 			e2eskipper.Skipf(fmt.Sprintf("Number of available nodes is less than %d - skipping", numPods))
 		}
-		if l.config.ClientNodeName != "" {
+		if l.config.ClientNodeSelection.Name != "" {
 			e2eskipper.Skipf("Driver %q requires to deploy on a specific node - skipping", l.driver.GetDriverInfo().Name)
 		}
 		// For multi-node tests there must be enough nodes with the same toopology to schedule the pods
-		nodeSelection := e2epod.NodeSelection{Name: l.config.ClientNodeName}
 		topologyKeys := dInfo.TopologyKeys
 		if len(topologyKeys) != 0 {
-			if err = ensureTopologyRequirements(&nodeSelection, nodes, l.cs, topologyKeys, 2); err != nil {
+			if err = ensureTopologyRequirements(&l.config.ClientNodeSelection, nodes, l.cs, topologyKeys, 2); err != nil {
 				framework.Failf("Error setting topology requirements: %v", err)
 			}
 		}
@@ -367,7 +365,7 @@ func (t *multiVolumeTestSuite) DefineTests(driver TestDriver, pattern testpatter
 
 		// Test access to the volume from pods on different node
 		TestConcurrentAccessToSingleVolume(l.config.Framework, l.cs, l.ns.Name,
-			nodeSelection, resource.Pvc, numPods, false /* sameNode */)
+			l.config.ClientNodeSelection, resource.Pvc, numPods, false /* sameNode */)
 	})
 }
 
@@ -376,9 +374,13 @@ func (t *multiVolumeTestSuite) DefineTests(driver TestDriver, pattern testpatter
 func testAccessMultipleVolumes(f *framework.Framework, cs clientset.Interface, ns string,
 	node e2epod.NodeSelection, pvcs []*v1.PersistentVolumeClaim, readSeedBase int64, writeSeedBase int64) string {
 	ginkgo.By(fmt.Sprintf("Creating pod on %+v with multiple volumes", node))
-	pod, err := e2epod.CreateSecPodWithNodeSelection(cs, ns, pvcs, nil,
-		false, "", false, false, e2epv.SELinuxLabel,
-		nil, node, framework.PodStartTimeout)
+	podConfig := e2epod.Config{
+		NS:            ns,
+		PVCs:          pvcs,
+		SeLinuxLabel:  e2epv.SELinuxLabel,
+		NodeSelection: node,
+	}
+	pod, err := e2epod.CreateSecPodWithNodeSelection(cs, &podConfig, framework.PodStartTimeout)
 	defer func() {
 		framework.ExpectNoError(e2epod.DeletePodWithWait(cs, pod))
 	}()
@@ -404,7 +406,7 @@ func testAccessMultipleVolumes(f *framework.Framework, cs clientset.Interface, n
 		utils.CheckReadFromPath(f, pod, *pvc.Spec.VolumeMode, path, byteLen, writeSeedBase+int64(i))
 	}
 
-	pod, err = cs.CoreV1().Pods(pod.Namespace).Get(pod.Name, metav1.GetOptions{})
+	pod, err = cs.CoreV1().Pods(pod.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
 	framework.ExpectNoError(err, "get pod")
 	return pod.Spec.NodeName
 }
@@ -449,15 +451,18 @@ func TestConcurrentAccessToSingleVolume(f *framework.Framework, cs clientset.Int
 	for i := 0; i < numPods; i++ {
 		index := i + 1
 		ginkgo.By(fmt.Sprintf("Creating pod%d with a volume on %+v", index, node))
-		pod, err := e2epod.CreateSecPodWithNodeSelection(cs, ns,
-			[]*v1.PersistentVolumeClaim{pvc}, nil,
-			false, "", false, false, e2epv.SELinuxLabel,
-			nil, node, framework.PodStartTimeout)
+		podConfig := e2epod.Config{
+			NS:            ns,
+			PVCs:          []*v1.PersistentVolumeClaim{pvc},
+			SeLinuxLabel:  e2epv.SELinuxLabel,
+			NodeSelection: node,
+		}
+		pod, err := e2epod.CreateSecPodWithNodeSelection(cs, &podConfig, framework.PodStartTimeout)
 		defer func() {
 			framework.ExpectNoError(e2epod.DeletePodWithWait(cs, pod))
 		}()
 		framework.ExpectNoError(err)
-		pod, err = cs.CoreV1().Pods(pod.Namespace).Get(pod.Name, metav1.GetOptions{})
+		pod, err = cs.CoreV1().Pods(pod.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
 		pods = append(pods, pod)
 		framework.ExpectNoError(err, fmt.Sprintf("get pod%d", index))
 		actualNodeName := pod.Spec.NodeName
@@ -574,7 +579,7 @@ func ensureTopologyRequirements(nodeSelection *e2epod.NodeSelection, nodes *v1.N
 		}
 	}
 	if len(suitableTopologies) == 0 {
-		framework.Skipf("No topology with at least %d nodes found - skipping", minCount)
+		e2eskipper.Skipf("No topology with at least %d nodes found - skipping", minCount)
 	}
 	// Take the first suitable topology
 	e2epod.SetNodeAffinityTopologyRequirement(nodeSelection, suitableTopologies[0])

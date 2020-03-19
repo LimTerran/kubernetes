@@ -765,12 +765,22 @@ function construct-linux-kubelet-flags {
       flags+=" --kubeconfig=/var/lib/kubelet/bootstrap-kubeconfig"
       flags+=" --register-schedulable=false"
     fi
+    if [[ "${MASTER_OS_DISTRIBUTION}" == "ubuntu" ]]; then
+      # Configure the file path for host dns configuration
+      # as ubuntu uses systemd-resolved
+      flags+=" --resolv-conf=/run/systemd/resolve/resolv.conf"
+    fi
   else # For nodes
     flags+=" ${NODE_KUBELET_TEST_ARGS:-}"
     flags+=" --bootstrap-kubeconfig=/var/lib/kubelet/bootstrap-kubeconfig"
     flags+=" --kubeconfig=/var/lib/kubelet/kubeconfig"
     if [[ "${node_type}" == "heapster" ]]; then
         flags+=" ${HEAPSTER_KUBELET_TEST_ARGS:-}"
+    fi
+    if [[ "${NODE_OS_DISTRIBUTION}" == "ubuntu" ]]; then
+      # Configure the file path for host dns configuration
+      # as ubuntu uses systemd-resolved
+      flags+=" --resolv-conf=/run/systemd/resolve/resolv.conf"
     fi
   fi
   # Network plugin
@@ -1214,6 +1224,9 @@ DISABLE_PROMETHEUS_TO_SD_IN_DS: $(yaml-quote ${DISABLE_PROMETHEUS_TO_SD_IN_DS:-f
 CONTAINER_RUNTIME: $(yaml-quote ${CONTAINER_RUNTIME:-})
 CONTAINER_RUNTIME_ENDPOINT: $(yaml-quote ${CONTAINER_RUNTIME_ENDPOINT:-})
 CONTAINER_RUNTIME_NAME: $(yaml-quote ${CONTAINER_RUNTIME_NAME:-})
+CONTAINER_RUNTIME_TEST_HANDLER: $(yaml-quote ${CONTAINER_RUNTIME_TEST_HANDLER:-})
+UBUNTU_INSTALL_CONTAINERD_VERSION: $(yaml-quote ${UBUNTU_INSTALL_CONTAINERD_VERSION:-})
+UBUNTU_INSTALL_RUNC_VERSION: $(yaml-quote ${UBUNTU_INSTALL_RUNC_VERSION:-})
 NODE_LOCAL_SSDS_EXT: $(yaml-quote ${NODE_LOCAL_SSDS_EXT:-})
 LOAD_IMAGE_COMMAND: $(yaml-quote ${LOAD_IMAGE_COMMAND:-})
 ZONE: $(yaml-quote ${ZONE})
@@ -1511,6 +1524,11 @@ EOF
 ENABLE_EGRESS_VIA_KONNECTIVITY_SERVICE: $(yaml-quote ${ENABLE_EGRESS_VIA_KONNECTIVITY_SERVICE})
 EOF
   fi
+  if [[ -n "${KONNECTIVITY_SERVICE_PROXY_PROTOCOL_MODE:-}" ]]; then
+      cat >>$file <<EOF
+KONNECTIVITY_SERVICE_PROXY_PROTOCOL_MODE: $(yaml-quote ${KONNECTIVITY_SERVICE_PROXY_PROTOCOL_MODE})
+EOF
+  fi
 }
 
 
@@ -1528,6 +1546,8 @@ NODE_DIR: $(yaml-quote ${WINDOWS_NODE_DIR})
 LOGS_DIR: $(yaml-quote ${WINDOWS_LOGS_DIR})
 CNI_DIR: $(yaml-quote ${WINDOWS_CNI_DIR})
 CNI_CONFIG_DIR: $(yaml-quote ${WINDOWS_CNI_CONFIG_DIR})
+WINDOWS_CNI_STORAGE_PATH: $(yaml-quote ${WINDOWS_CNI_STORAGE_PATH})
+WINDOWS_CNI_VERSION: $(yaml-quote ${WINDOWS_CNI_VERSION})
 MANIFESTS_DIR: $(yaml-quote ${WINDOWS_MANIFESTS_DIR})
 PKI_DIR: $(yaml-quote ${WINDOWS_PKI_DIR})
 CA_FILE_PATH: $(yaml-quote ${WINDOWS_CA_FILE})
@@ -2925,7 +2945,7 @@ function attach-internal-master-ip() {
   echo "Setting ${name}'s aliases to '${aliases}' (added ${ip})"
   # Attach ${ip} to ${name}
   gcloud compute instances network-interfaces update "${name}" --project "${PROJECT}" --zone "${zone}" --aliases="${aliases}"
-  run-gcloud-command "${name}" "${zone}" "sudo ip route add to local ${ip}/32 dev eth0"
+  run-gcloud-command "${name}" "${zone}" 'sudo ip route add to local '${ip}'/32 dev $(ip route | grep default | awk '\''{print $5}'\'')' || true
   return $?
 }
 
@@ -2943,7 +2963,7 @@ function detach-internal-master-ip() {
   echo "Setting ${name}'s aliases to '${aliases}' (removed ${ip})"
   # Detach ${MASTER_NAME}-internal-ip from ${name}
   gcloud compute instances network-interfaces update "${name}" --project "${PROJECT}" --zone "${zone}" --aliases="${aliases}"
-  run-gcloud-command "${name}" "${zone}" "sudo ip route del to local ${ip}/32 dev eth0"
+  run-gcloud-command "${name}" "${zone}" 'sudo ip route del to local '${ip}'/32 dev $(ip route | grep default | awk '\''{print $5}'\'')' || true
   return $?
 }
 

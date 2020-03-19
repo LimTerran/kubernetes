@@ -21,7 +21,7 @@ package vmssclient
 import (
 	"context"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-07-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-12-01/compute"
 	"k8s.io/legacy-cloud-providers/azure/retry"
 )
 
@@ -42,4 +42,7 @@ type Interface interface {
 
 	// CreateOrUpdate creates or updates a VirtualMachineScaleSet.
 	CreateOrUpdate(ctx context.Context, resourceGroupName string, VMScaleSetName string, parameters compute.VirtualMachineScaleSet) *retry.Error
+
+	// DeleteInstances deletes the instances for a VirtualMachineScaleSet.
+	DeleteInstances(ctx context.Context, resourceGroupName string, vmScaleSetName string, vmInstanceIDs compute.VirtualMachineScaleSetVMInstanceRequiredIDs) *retry.Error
 }

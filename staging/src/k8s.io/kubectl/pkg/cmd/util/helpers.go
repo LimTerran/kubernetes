@@ -452,6 +452,7 @@ func AddApplyAnnotationVarFlags(cmd *cobra.Command, applyAnnotation *bool) {
 // TODO: need to take a pass at other generator commands to use this set of flags
 func AddGeneratorFlags(cmd *cobra.Command, defaultGenerator string) {
 	cmd.Flags().String("generator", defaultGenerator, "The name of the API generator to use.")
+	cmd.Flags().MarkDeprecated("generator", "has no effect and will be removed in the future.")
 	AddDryRunFlag(cmd)
 }
 
@@ -523,19 +524,6 @@ const (
 	DryRunClient
 	DryRunServer
 )
-
-// TODO(julianvmodesto): remove GetClientSideDryRun once we support
-// server-side dry-run in all commands
-func GetClientSideDryRun(cmd *cobra.Command) bool {
-	dryRunStrategy, err := GetDryRunStrategy(cmd)
-	if err != nil {
-		klog.Fatalf("error accessing --dry-run flag for command %s: %v", cmd.Name(), err)
-	}
-	if dryRunStrategy == DryRunServer {
-		klog.Fatalf("--dry-run=server for command %s is not supported yet", cmd.Name())
-	}
-	return dryRunStrategy == DryRunClient
-}
 
 func GetDryRunStrategy(cmd *cobra.Command) (DryRunStrategy, error) {
 	var dryRunFlag = GetFlagString(cmd, "dry-run")

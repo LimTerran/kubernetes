@@ -17,6 +17,7 @@ limitations under the License.
 package apimachinery
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -208,17 +209,17 @@ var _ = SIGDescribe("CustomResourceConversionWebhook [Privileged:ClusterAdmin]",
 })
 
 func cleanCRDWebhookTest(client clientset.Interface, namespaceName string) {
-	_ = client.CoreV1().Services(namespaceName).Delete(serviceCRDName, nil)
-	_ = client.AppsV1().Deployments(namespaceName).Delete(deploymentCRDName, nil)
-	_ = client.CoreV1().Secrets(namespaceName).Delete(secretCRDName, nil)
-	_ = client.RbacV1().RoleBindings("kube-system").Delete(roleBindingCRDName, nil)
+	_ = client.CoreV1().Services(namespaceName).Delete(context.TODO(), serviceCRDName, metav1.DeleteOptions{})
+	_ = client.AppsV1().Deployments(namespaceName).Delete(context.TODO(), deploymentCRDName, metav1.DeleteOptions{})
+	_ = client.CoreV1().Secrets(namespaceName).Delete(context.TODO(), secretCRDName, metav1.DeleteOptions{})
+	_ = client.RbacV1().RoleBindings("kube-system").Delete(context.TODO(), roleBindingCRDName, metav1.DeleteOptions{})
 }
 
 func createAuthReaderRoleBindingForCRDConversion(f *framework.Framework, namespace string) {
 	ginkgo.By("Create role binding to let cr conversion webhook read extension-apiserver-authentication")
 	client := f.ClientSet
 	// Create the role binding to allow the webhook read the extension-apiserver-authentication configmap
-	_, err := client.RbacV1().RoleBindings("kube-system").Create(&rbacv1.RoleBinding{
+	_, err := client.RbacV1().RoleBindings("kube-system").Create(context.TODO(), &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: roleBindingCRDName,
 		},
@@ -227,7 +228,7 @@ func createAuthReaderRoleBindingForCRDConversion(f *framework.Framework, namespa
 			Kind:     "Role",
 			Name:     "extension-apiserver-authentication-reader",
 		},
-		// Webhook uses the default service account.
+
 		Subjects: []rbacv1.Subject{
 			{
 				Kind:      "ServiceAccount",
@@ -235,7 +236,7 @@ func createAuthReaderRoleBindingForCRDConversion(f *framework.Framework, namespa
 				Namespace: namespace,
 			},
 		},
-	})
+	}, metav1.CreateOptions{})
 	if err != nil && apierrors.IsAlreadyExists(err) {
 		framework.Logf("role binding %s already exists", roleBindingCRDName)
 	} else {
@@ -259,7 +260,7 @@ func deployCustomResourceWebhookAndService(f *framework.Framework, image string,
 		},
 	}
 	namespace := f.Namespace.Name
-	_, err := client.CoreV1().Secrets(namespace).Create(secret)
+	_, err := client.CoreV1().Secrets(namespace).Create(context.TODO(), secret, metav1.CreateOptions{})
 	framework.ExpectNoError(err, "creating secret %q in namespace %q", secretName, namespace)
 
 	// Create the deployment of the webhook
@@ -335,7 +336,7 @@ func deployCustomResourceWebhookAndService(f *framework.Framework, image string,
 			},
 		},
 	}
-	deployment, err := client.AppsV1().Deployments(namespace).Create(d)
+	deployment, err := client.AppsV1().Deployments(namespace).Create(context.TODO(), d, metav1.CreateOptions{})
 	framework.ExpectNoError(err, "creating deployment %s in namespace %s", deploymentCRDName, namespace)
 	ginkgo.By("Wait for the deployment to be ready")
 	err = e2edeploy.WaitForDeploymentRevisionAndImage(client, namespace, deploymentCRDName, "1", image)
@@ -363,7 +364,7 @@ func deployCustomResourceWebhookAndService(f *framework.Framework, image string,
 			},
 		},
 	}
-	_, err = client.CoreV1().Services(namespace).Create(service)
+	_, err = client.CoreV1().Services(namespace).Create(context.TODO(), service, metav1.CreateOptions{})
 	framework.ExpectNoError(err, "creating service %s in namespace %s", serviceCRDName, namespace)
 
 	ginkgo.By("Verifying the service has paired with the endpoint")
@@ -410,10 +411,10 @@ func testCustomResourceConversionWebhook(f *framework.Framework, crd *apiextensi
 			"hostPort": "localhost:8080",
 		},
 	}
-	_, err := customResourceClients["v1"].Create(crInstance, metav1.CreateOptions{})
+	_, err := customResourceClients["v1"].Create(context.TODO(), crInstance, metav1.CreateOptions{})
 	gomega.Expect(err).To(gomega.BeNil())
 	ginkgo.By("v2 custom resource should be converted")
-	v2crd, err := customResourceClients["v2"].Get(name, metav1.GetOptions{})
+	v2crd, err := customResourceClients["v2"].Get(context.TODO(), name, metav1.GetOptions{})
 	framework.ExpectNoError(err, "Getting v2 of custom resource %s", name)
 	verifyV2Object(crd, v2crd)
 }
@@ -435,7 +436,7 @@ func testCRListConversion(f *framework.Framework, testCrd *crd.TestCrd) {
 			"hostPort": "localhost:8080",
 		},
 	}
-	_, err := customResourceClients["v1"].Create(crInstance, metav1.CreateOptions{})
+	_, err := customResourceClients["v1"].Create(context.TODO(), crInstance, metav1.CreateOptions{})
 	gomega.Expect(err).To(gomega.BeNil())
 
 	// Now cr-instance-1 is stored as v1. lets change storage version
@@ -462,7 +463,7 @@ func testCRListConversion(f *framework.Framework, testCrd *crd.TestCrd) {
 	//
 	// TODO: we have to wait for the storage version to become effective. Storage version changes are not instant.
 	for i := 0; i < 5; i++ {
-		_, err = customResourceClients["v1"].Create(crInstance, metav1.CreateOptions{})
+		_, err = customResourceClients["v1"].Create(context.TODO(), crInstance, metav1.CreateOptions{})
 		if err == nil {
 			break
 		}
@@ -472,7 +473,7 @@ func testCRListConversion(f *framework.Framework, testCrd *crd.TestCrd) {
 	// Now that we have a v1 and v2 object, both list operation in v1 and v2 should work as expected.
 
 	ginkgo.By("List CRs in v1")
-	list, err := customResourceClients["v1"].List(metav1.ListOptions{})
+	list, err := customResourceClients["v1"].List(context.TODO(), metav1.ListOptions{})
 	gomega.Expect(err).To(gomega.BeNil())
 	gomega.Expect(len(list.Items)).To(gomega.BeIdenticalTo(2))
 	framework.ExpectEqual((list.Items[0].GetName() == name1 && list.Items[1].GetName() == name2) ||
@@ -481,7 +482,7 @@ func testCRListConversion(f *framework.Framework, testCrd *crd.TestCrd) {
 	verifyV1Object(crd, &list.Items[1])
 
 	ginkgo.By("List CRs in v2")
-	list, err = customResourceClients["v2"].List(metav1.ListOptions{})
+	list, err = customResourceClients["v2"].List(context.TODO(), metav1.ListOptions{})
 	gomega.Expect(err).To(gomega.BeNil())
 	gomega.Expect(len(list.Items)).To(gomega.BeIdenticalTo(2))
 	framework.ExpectEqual((list.Items[0].GetName() == name1 && list.Items[1].GetName() == name2) ||
@@ -503,7 +504,7 @@ func waitWebhookConversionReady(f *framework.Framework, crd *apiextensionsv1.Cus
 				},
 			},
 		}
-		_, err := customResourceClients[version].Create(crInstance, metav1.CreateOptions{})
+		_, err := customResourceClients[version].Create(context.TODO(), crInstance, metav1.CreateOptions{})
 		if err != nil {
 			// tolerate clusters that do not set --enable-aggregator-routing and have to wait for kube-proxy
 			// to program the service network, during which conversion requests return errors
@@ -511,7 +512,7 @@ func waitWebhookConversionReady(f *framework.Framework, crd *apiextensionsv1.Cus
 			return false, nil
 		}
 
-		framework.ExpectNoError(customResourceClients[version].Delete(crInstance.GetName(), nil), "cleaning up stub object")
+		framework.ExpectNoError(customResourceClients[version].Delete(context.TODO(), crInstance.GetName(), metav1.DeleteOptions{}), "cleaning up stub object")
 		return true, nil
 	}))
 }

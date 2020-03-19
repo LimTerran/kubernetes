@@ -17,6 +17,7 @@ limitations under the License.
 package podautoscaler
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"time"
@@ -451,34 +452,31 @@ func (a *HorizontalController) computeStatusForResourceMetric(currentReplicas in
 			},
 		}
 		return replicaCountProposal, timestampProposal, metricNameProposal, autoscalingv2.HorizontalPodAutoscalerCondition{}, nil
-	} else {
-		if metricSpec.Resource.Target.AverageUtilization == nil {
-			errMsg := "invalid resource metric source: neither a utilization target nor a value target was set"
-			err = fmt.Errorf(errMsg)
-			condition = a.getUnableComputeReplicaCountCondition(hpa, "FailedGetResourceMetric", err)
-			return 0, time.Time{}, "", condition, fmt.Errorf(errMsg)
-		}
-		targetUtilization := *metricSpec.Resource.Target.AverageUtilization
-		var percentageProposal int32
-		var rawProposal int64
-		replicaCountProposal, percentageProposal, rawProposal, timestampProposal, err := a.replicaCalc.GetResourceReplicas(currentReplicas, targetUtilization, metricSpec.Resource.Name, hpa.Namespace, selector)
-		if err != nil {
-			condition = a.getUnableComputeReplicaCountCondition(hpa, "FailedGetResourceMetric", err)
-			return 0, time.Time{}, "", condition, fmt.Errorf("failed to get %s utilization: %v", metricSpec.Resource.Name, err)
-		}
-		metricNameProposal = fmt.Sprintf("%s resource utilization (percentage of request)", metricSpec.Resource.Name)
-		*status = autoscalingv2.MetricStatus{
-			Type: autoscalingv2.ResourceMetricSourceType,
-			Resource: &autoscalingv2.ResourceMetricStatus{
-				Name: metricSpec.Resource.Name,
-				Current: autoscalingv2.MetricValueStatus{
-					AverageUtilization: &percentageProposal,
-					AverageValue:       resource.NewMilliQuantity(rawProposal, resource.DecimalSI),
-				},
-			},
-		}
-		return replicaCountProposal, timestampProposal, metricNameProposal, autoscalingv2.HorizontalPodAutoscalerCondition{}, nil
 	}
+	if metricSpec.Resource.Target.AverageUtilization == nil {
+		errMsg := "invalid resource metric source: neither a utilization target nor a value target was set"
+		err = fmt.Errorf(errMsg)
+		condition = a.getUnableComputeReplicaCountCondition(hpa, "FailedGetResourceMetric", err)
+		return 0, time.Time{}, "", condition, fmt.Errorf(errMsg)
+	}
+	targetUtilization := *metricSpec.Resource.Target.AverageUtilization
+	replicaCountProposal, percentageProposal, rawProposal, timestampProposal, err := a.replicaCalc.GetResourceReplicas(currentReplicas, targetUtilization, metricSpec.Resource.Name, hpa.Namespace, selector)
+	if err != nil {
+		condition = a.getUnableComputeReplicaCountCondition(hpa, "FailedGetResourceMetric", err)
+		return 0, time.Time{}, "", condition, fmt.Errorf("failed to get %s utilization: %v", metricSpec.Resource.Name, err)
+	}
+	metricNameProposal = fmt.Sprintf("%s resource utilization (percentage of request)", metricSpec.Resource.Name)
+	*status = autoscalingv2.MetricStatus{
+		Type: autoscalingv2.ResourceMetricSourceType,
+		Resource: &autoscalingv2.ResourceMetricStatus{
+			Name: metricSpec.Resource.Name,
+			Current: autoscalingv2.MetricValueStatus{
+				AverageUtilization: &percentageProposal,
+				AverageValue:       resource.NewMilliQuantity(rawProposal, resource.DecimalSI),
+			},
+		},
+	}
+	return replicaCountProposal, timestampProposal, metricNameProposal, autoscalingv2.HorizontalPodAutoscalerCondition{}, nil
 }
 
 // computeStatusForExternalMetric computes the desired number of replicas for the specified metric of type ExternalMetricSourceType.
@@ -647,7 +645,7 @@ func (a *HorizontalController) reconcileAutoscaler(hpav1Shared *autoscalingv1.Ho
 
 	if rescale {
 		scale.Spec.Replicas = desiredReplicas
-		_, err = a.scaleNamespacer.Scales(hpa.Namespace).Update(targetGR, scale)
+		_, err = a.scaleNamespacer.Scales(hpa.Namespace).Update(context.TODO(), targetGR, scale, metav1.UpdateOptions{})
 		if err != nil {
 			a.eventRecorder.Eventf(hpa, v1.EventTypeWarning, "FailedRescale", "New size: %d; reason: %s; error: %v", desiredReplicas, rescaleReason, err.Error())
 			setCondition(hpa, autoscalingv2.AbleToScale, v1.ConditionFalse, "FailedUpdateScale", "the HPA controller was unable to update the target scale: %v", err)
@@ -936,7 +934,6 @@ func convertDesiredReplicasWithRules(currentReplicas, desiredReplicas, hpaMinRep
 	var possibleLimitingReason string
 
 	minimumAllowedReplicas = hpaMinReplicas
-	possibleLimitingReason = "the desired replica count is less than the minimum replica count"
 
 	// Do not upscale too much to prevent incorrect rapid increase of the number of master replicas caused by
 	// bogus CPU usage report from heapster/kubelet (like in issue #32304).
@@ -944,7 +941,6 @@ func convertDesiredReplicasWithRules(currentReplicas, desiredReplicas, hpaMinRep
 
 	if hpaMaxReplicas > scaleUpLimit {
 		maximumAllowedReplicas = scaleUpLimit
-
 		possibleLimitingCondition = "ScaleUpLimit"
 		possibleLimitingReason = "the desired replica count is increasing faster than the maximum scale rate"
 	} else {
@@ -993,7 +989,7 @@ func getLongestPolicyPeriod(scalingRules *autoscalingv2.HPAScalingRules) int32 {
 
 // calculateScaleUpLimitWithScalingRules returns the maximum number of pods that could be added for the given HPAScalingRules
 func calculateScaleUpLimitWithScalingRules(currentReplicas int32, scaleEvents []timestampedScaleEvent, scalingRules *autoscalingv2.HPAScalingRules) int32 {
-	var result int32 = 0
+	var result int32
 	var proposed int32
 	var selectPolicyFn func(int32, int32) int32
 	if *scalingRules.SelectPolicy == autoscalingv2.DisabledPolicySelect {
@@ -1051,7 +1047,7 @@ func (a *HorizontalController) scaleForResourceMappings(namespace, name string, 
 	var firstErr error
 	for i, mapping := range mappings {
 		targetGR := mapping.Resource.GroupResource()
-		scale, err := a.scaleNamespacer.Scales(namespace).Get(targetGR, name)
+		scale, err := a.scaleNamespacer.Scales(namespace).Get(context.TODO(), targetGR, name, metav1.GetOptions{})
 		if err == nil {
 			return scale, targetGR, nil
 		}
@@ -1112,7 +1108,7 @@ func (a *HorizontalController) updateStatus(hpa *autoscalingv2.HorizontalPodAuto
 	}
 	hpav1 := hpaRaw.(*autoscalingv1.HorizontalPodAutoscaler)
 
-	_, err = a.hpaNamespacer.HorizontalPodAutoscalers(hpav1.Namespace).UpdateStatus(hpav1)
+	_, err = a.hpaNamespacer.HorizontalPodAutoscalers(hpav1.Namespace).UpdateStatus(context.TODO(), hpav1, metav1.UpdateOptions{})
 	if err != nil {
 		a.eventRecorder.Event(hpa, v1.EventTypeWarning, "FailedUpdateStatus", err.Error())
 		return fmt.Errorf("failed to update status for %s: %v", hpa.Name, err)
@@ -1181,15 +1177,13 @@ func setConditionInList(inputList []autoscalingv2.HorizontalPodAutoscalerConditi
 func max(a, b int32) int32 {
 	if a >= b {
 		return a
-	} else {
-		return b
 	}
+	return b
 }
 
 func min(a, b int32) int32 {
 	if a <= b {
 		return a
-	} else {
-		return b
 	}
+	return b
 }

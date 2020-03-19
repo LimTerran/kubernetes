@@ -19,16 +19,14 @@ package defaultpodtopologyspread
 import (
 	"context"
 	"fmt"
+
 	"k8s.io/klog"
 
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	appslisters "k8s.io/client-go/listers/apps/v1"
-	corelisters "k8s.io/client-go/listers/core/v1"
+	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/helper"
 	framework "k8s.io/kubernetes/pkg/scheduler/framework/v1alpha1"
-	schedulerlisters "k8s.io/kubernetes/pkg/scheduler/listers"
 	schedulernodeinfo "k8s.io/kubernetes/pkg/scheduler/nodeinfo"
 	utilnode "k8s.io/kubernetes/pkg/util/node"
 )
@@ -43,8 +41,8 @@ var _ framework.ScorePlugin = &DefaultPodTopologySpread{}
 const (
 	// Name is the name of the plugin used in the plugin registry and configurations.
 	Name = "DefaultPodTopologySpread"
-	// postFilterStateKey is the key in CycleState to DefaultPodTopologySpread pre-computed data for Scoring.
-	postFilterStateKey = "PostFilter" + Name
+	// preScoreStateKey is the key in CycleState to DefaultPodTopologySpread pre-computed data for Scoring.
+	preScoreStateKey = "PreScore" + Name
 
 	// When zone information is present, give 2/3 of the weighting to zone spreading, 1/3 to node spreading
 	// TODO: Any way to justify this weighting?
@@ -56,18 +54,20 @@ func (pl *DefaultPodTopologySpread) Name() string {
 	return Name
 }
 
-// postFilterState computed at PostFilter and used at Score.
-type postFilterState struct {
+// preScoreState computed at PreScore and used at Score.
+type preScoreState struct {
 	selector labels.Selector
 }
 
 // Clone implements the mandatory Clone interface. We don't really copy the data since
 // there is no need for that.
-func (s *postFilterState) Clone() framework.StateData {
+func (s *preScoreState) Clone() framework.StateData {
 	return s
 }
 
 // skipDefaultPodTopologySpread returns true if the pod's TopologySpreadConstraints are specified.
+// Note that this doesn't take into account default constraints defined for
+// the PodTopologySpread plugin.
 func skipDefaultPodTopologySpread(pod *v1.Pod) bool {
 	return len(pod.Spec.TopologySpreadConstraints) != 0
 }
@@ -80,14 +80,14 @@ func (pl *DefaultPodTopologySpread) Score(ctx context.Context, state *framework.
 		return 0, nil
 	}
 
-	c, err := state.Read(postFilterStateKey)
+	c, err := state.Read(preScoreStateKey)
 	if err != nil {
-		return 0, framework.NewStatus(framework.Error, fmt.Sprintf("Error reading %q from cycleState: %v", postFilterStateKey, err))
+		return 0, framework.NewStatus(framework.Error, fmt.Sprintf("Error reading %q from cycleState: %v", preScoreStateKey, err))
 	}
 
-	s, ok := c.(*postFilterState)
+	s, ok := c.(*preScoreState)
 	if !ok {
-		return 0, framework.NewStatus(framework.Error, fmt.Sprintf("%+v convert to tainttoleration.postFilterState error", c))
+		return 0, framework.NewStatus(framework.Error, fmt.Sprintf("%+v convert to tainttoleration.preScoreState error", c))
 	}
 
 	nodeInfo, err := pl.handle.SnapshotSharedLister().NodeInfos().Get(nodeName)
@@ -177,21 +177,21 @@ func (pl *DefaultPodTopologySpread) ScoreExtensions() framework.ScoreExtensions 
 	return pl
 }
 
-// PostFilter builds and writes cycle state used by Score and NormalizeScore.
-func (pl *DefaultPodTopologySpread) PostFilter(ctx context.Context, cycleState *framework.CycleState, pod *v1.Pod, nodes []*v1.Node, _ framework.NodeToStatusMap) *framework.Status {
+// PreScore builds and writes cycle state used by Score and NormalizeScore.
+func (pl *DefaultPodTopologySpread) PreScore(ctx context.Context, cycleState *framework.CycleState, pod *v1.Pod, nodes []*v1.Node) *framework.Status {
 	var selector labels.Selector
 	informerFactory := pl.handle.SharedInformerFactory()
-	selector = getSelector(
+	selector = helper.DefaultSelector(
 		pod,
 		informerFactory.Core().V1().Services().Lister(),
 		informerFactory.Core().V1().ReplicationControllers().Lister(),
 		informerFactory.Apps().V1().ReplicaSets().Lister(),
 		informerFactory.Apps().V1().StatefulSets().Lister(),
 	)
-	state := &postFilterState{
+	state := &preScoreState{
 		selector: selector,
 	}
-	cycleState.Write(postFilterStateKey, state)
+	cycleState.Write(preScoreStateKey, state)
 	return nil
 }
 
@@ -218,50 +218,4 @@ func countMatchingPods(namespace string, selector labels.Selector, nodeInfo *sch
 		}
 	}
 	return count
-}
-
-// getSelector returns a selector for the services, RCs, RSs, and SSs matching the given pod.
-func getSelector(pod *v1.Pod, sl corelisters.ServiceLister, cl corelisters.ReplicationControllerLister, rsl appslisters.ReplicaSetLister, ssl appslisters.StatefulSetLister) labels.Selector {
-	labelSet := make(labels.Set)
-	// Since services, RCs, RSs and SSs match the pod, they won't have conflicting
-	// labels. Merging is safe.
-
-	if services, err := schedulerlisters.GetPodServices(sl, pod); err == nil {
-		for _, service := range services {
-			labelSet = labels.Merge(labelSet, service.Spec.Selector)
-		}
-	}
-
-	if rcs, err := cl.GetPodControllers(pod); err == nil {
-		for _, rc := range rcs {
-			labelSet = labels.Merge(labelSet, rc.Spec.Selector)
-		}
-	}
-
-	selector := labels.NewSelector()
-	if len(labelSet) != 0 {
-		selector = labelSet.AsSelector()
-	}
-
-	if rss, err := rsl.GetPodReplicaSets(pod); err == nil {
-		for _, rs := range rss {
-			if other, err := metav1.LabelSelectorAsSelector(rs.Spec.Selector); err == nil {
-				if r, ok := other.Requirements(); ok {
-					selector = selector.Add(r...)
-				}
-			}
-		}
-	}
-
-	if sss, err := ssl.GetPodStatefulSets(pod); err == nil {
-		for _, ss := range sss {
-			if other, err := metav1.LabelSelectorAsSelector(ss.Spec.Selector); err == nil {
-				if r, ok := other.Requirements(); ok {
-					selector = selector.Add(r...)
-				}
-			}
-		}
-	}
-
-	return selector
 }

@@ -30,13 +30,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/client-go/informers"
-	coreinformers "k8s.io/client-go/informers/core/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/events"
-	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 	"k8s.io/kubernetes/pkg/scheduler"
+	"k8s.io/kubernetes/pkg/scheduler/profile"
 	"k8s.io/kubernetes/test/integration/framework"
 )
 
@@ -108,14 +107,14 @@ func initTestSchedulerWithOptions(
 	eventBroadcaster := events.NewBroadcaster(&events.EventSinkImpl{
 		Interface: testCtx.clientSet.EventsV1beta1().Events(""),
 	})
-	recorder := eventBroadcaster.NewRecorder(
-		legacyscheme.Scheme,
-		v1.DefaultSchedulerName,
-	)
 
 	var err error
-	testCtx.scheduler, err = createSchedulerWithPodInformer(
-		testCtx.clientSet, podInformer, testCtx.informerFactory, recorder, testCtx.ctx.Done())
+	testCtx.scheduler, err = scheduler.New(
+		testCtx.clientSet,
+		testCtx.informerFactory,
+		podInformer,
+		profile.NewRecorderFactory(eventBroadcaster),
+		testCtx.ctx.Done())
 
 	if err != nil {
 		t.Fatalf("Couldn't create scheduler: %v", err)
@@ -130,30 +129,13 @@ func initTestSchedulerWithOptions(
 	return testCtx
 }
 
-// createSchedulerWithPodInformer creates a new scheduler.
-func createSchedulerWithPodInformer(
-	clientSet clientset.Interface,
-	podInformer coreinformers.PodInformer,
-	informerFactory informers.SharedInformerFactory,
-	recorder events.EventRecorder,
-	stopCh <-chan struct{},
-) (*scheduler.Scheduler, error) {
-	return scheduler.New(
-		clientSet,
-		informerFactory,
-		podInformer,
-		recorder,
-		stopCh,
-	)
-}
-
 // cleanupTest deletes the scheduler and the test namespace. It should be called
 // at the end of a test.
 func cleanupTest(t *testing.T, testCtx *testContext) {
 	// Kill the scheduler.
 	testCtx.cancelFn()
 	// Cleanup nodes.
-	testCtx.clientSet.CoreV1().Nodes().DeleteCollection(nil, metav1.ListOptions{})
+	testCtx.clientSet.CoreV1().Nodes().DeleteCollection(context.TODO(), metav1.DeleteOptions{}, metav1.ListOptions{})
 	framework.DeleteTestingNamespace(testCtx.ns, testCtx.httpServer, t)
 	testCtx.closeFn()
 }
@@ -185,7 +167,7 @@ func waitForPodUnschedulable(cs clientset.Interface, pod *v1.Pod) error {
 // podScheduled returns true if a node is assigned to the given pod.
 func podScheduled(c clientset.Interface, podNamespace, podName string) wait.ConditionFunc {
 	return func() (bool, error) {
-		pod, err := c.CoreV1().Pods(podNamespace).Get(podName, metav1.GetOptions{})
+		pod, err := c.CoreV1().Pods(podNamespace).Get(context.TODO(), podName, metav1.GetOptions{})
 		if err != nil {
 			// This could be a connection error so we want to retry.
 			return false, nil
@@ -201,7 +183,7 @@ func podScheduled(c clientset.Interface, podNamespace, podName string) wait.Cond
 // gets unschedulable status.
 func podUnschedulable(c clientset.Interface, podNamespace, podName string) wait.ConditionFunc {
 	return func() (bool, error) {
-		pod, err := c.CoreV1().Pods(podNamespace).Get(podName, metav1.GetOptions{})
+		pod, err := c.CoreV1().Pods(podNamespace).Get(context.TODO(), podName, metav1.GetOptions{})
 		if err != nil {
 			// This could be a connection error so we want to retry.
 			return false, nil

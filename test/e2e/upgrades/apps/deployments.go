@@ -17,6 +17,7 @@ limitations under the License.
 package upgrades
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -66,7 +67,7 @@ func (t *DeploymentUpgradeTest) Setup(f *framework.Framework) {
 
 	ginkgo.By(fmt.Sprintf("Creating a deployment %q with 1 replica in namespace %q", deploymentName, ns))
 	d := e2edeploy.NewDeployment(deploymentName, int32(1), map[string]string{"test": "upgrade"}, "nginx", nginxImage, appsv1.RollingUpdateDeploymentStrategyType)
-	deployment, err := deploymentClient.Create(d)
+	deployment, err := deploymentClient.Create(context.TODO(), d, metav1.CreateOptions{})
 	framework.ExpectNoError(err)
 
 	ginkgo.By(fmt.Sprintf("Waiting deployment %q to complete", deploymentName))
@@ -75,12 +76,10 @@ func (t *DeploymentUpgradeTest) Setup(f *framework.Framework) {
 	ginkgo.By(fmt.Sprintf("Getting replicaset revision 1 of deployment %q", deploymentName))
 	rsSelector, err := metav1.LabelSelectorAsSelector(d.Spec.Selector)
 	framework.ExpectNoError(err)
-	rsList, err := rsClient.List(metav1.ListOptions{LabelSelector: rsSelector.String()})
+	rsList, err := rsClient.List(context.TODO(), metav1.ListOptions{LabelSelector: rsSelector.String()})
 	framework.ExpectNoError(err)
 	rss := rsList.Items
-	if len(rss) != 1 {
-		framework.ExpectNoError(fmt.Errorf("expected one replicaset, got %d", len(rss)))
-	}
+	framework.ExpectEqual(len(rss), 1, "expected one replicaset, got %d", len(rss))
 	t.oldRSUID = rss[0].UID
 
 	ginkgo.By(fmt.Sprintf("Waiting for revision of the deployment %q to become 1", deploymentName))
@@ -97,12 +96,10 @@ func (t *DeploymentUpgradeTest) Setup(f *framework.Framework) {
 	framework.ExpectNoError(e2edeploy.WaitForDeploymentComplete(c, deployment))
 
 	ginkgo.By(fmt.Sprintf("Getting replicasets revision 1 and 2 of deployment %q", deploymentName))
-	rsList, err = rsClient.List(metav1.ListOptions{LabelSelector: rsSelector.String()})
+	rsList, err = rsClient.List(context.TODO(), metav1.ListOptions{LabelSelector: rsSelector.String()})
 	framework.ExpectNoError(err)
 	rss = rsList.Items
-	if len(rss) != 2 {
-		framework.ExpectNoError(fmt.Errorf("expected 2 replicaset, got %d", len(rss)))
-	}
+	framework.ExpectEqual(len(rss), 2, "expected 2 replicaset, got %d", len(rss))
 
 	ginkgo.By(fmt.Sprintf("Checking replicaset of deployment %q that is created before rollout survives the rollout", deploymentName))
 	switch t.oldRSUID {
@@ -131,7 +128,7 @@ func (t *DeploymentUpgradeTest) Test(f *framework.Framework, done <-chan struct{
 	deploymentClient := c.AppsV1().Deployments(ns)
 	rsClient := c.AppsV1().ReplicaSets(ns)
 
-	deployment, err := deploymentClient.Get(deploymentName, metav1.GetOptions{})
+	deployment, err := deploymentClient.Get(context.TODO(), deploymentName, metav1.GetOptions{})
 	framework.ExpectNoError(err)
 
 	ginkgo.By(fmt.Sprintf("Checking UID to verify deployment %q survives upgrade", deploymentName))
@@ -140,12 +137,10 @@ func (t *DeploymentUpgradeTest) Test(f *framework.Framework, done <-chan struct{
 	ginkgo.By(fmt.Sprintf("Verifying deployment %q does not create new replicasets", deploymentName))
 	rsSelector, err := metav1.LabelSelectorAsSelector(deployment.Spec.Selector)
 	framework.ExpectNoError(err)
-	rsList, err := rsClient.List(metav1.ListOptions{LabelSelector: rsSelector.String()})
+	rsList, err := rsClient.List(context.TODO(), metav1.ListOptions{LabelSelector: rsSelector.String()})
 	framework.ExpectNoError(err)
 	rss := rsList.Items
-	if len(rss) != 2 {
-		framework.ExpectNoError(fmt.Errorf("expected 2 replicaset, got %d", len(rss)))
-	}
+	framework.ExpectEqual(len(rss), 2, "expected 2 replicaset, got %d", len(rss))
 
 	switch t.oldRSUID {
 	case rss[0].UID:
@@ -181,7 +176,7 @@ func (t *DeploymentUpgradeTest) Teardown(f *framework.Framework) {
 // waitForDeploymentRevision waits for becoming the target revision of a delopyment.
 func waitForDeploymentRevision(c clientset.Interface, d *appsv1.Deployment, targetRevision string) error {
 	err := wait.PollImmediate(poll, pollLongTimeout, func() (bool, error) {
-		deployment, err := c.AppsV1().Deployments(d.Namespace).Get(d.Name, metav1.GetOptions{})
+		deployment, err := c.AppsV1().Deployments(d.Namespace).Get(context.TODO(), d.Name, metav1.GetOptions{})
 		if err != nil {
 			return false, err
 		}

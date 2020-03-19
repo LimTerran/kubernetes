@@ -19,175 +19,40 @@ package v1alpha2
 import (
 	"testing"
 
-	"k8s.io/apimachinery/pkg/conversion"
-	componentbaseconfig "k8s.io/component-base/config"
-	componentbaseconfigv1alpha1 "k8s.io/component-base/config/v1alpha1"
+	"github.com/google/go-cmp/cmp"
+
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/kube-scheduler/config/v1alpha2"
 	"k8s.io/kubernetes/pkg/scheduler/apis/config"
+	"k8s.io/utils/pointer"
 )
 
-func TestV1alpha1ToConfigKubeSchedulerLeaderElectionConfiguration(t *testing.T) {
-	configuration := &v1alpha2.KubeSchedulerLeaderElectionConfiguration{
-		LockObjectName:      "name",
-		LockObjectNamespace: "namespace",
-		LeaderElectionConfiguration: componentbaseconfigv1alpha1.LeaderElectionConfiguration{
-			ResourceName:      "name",
-			ResourceNamespace: "namespace",
-		},
-	}
-	emptyLockObjectNameConfig := configuration.DeepCopy()
-	emptyLockObjectNameConfig.LockObjectName = ""
-
-	emptyLockObjectNamespaceConfig := configuration.DeepCopy()
-	emptyLockObjectNamespaceConfig.LockObjectNamespace = ""
-
-	emptyResourceNameConfig := configuration.DeepCopy()
-	emptyResourceNameConfig.ResourceName = ""
-
-	emptyResourceNamespaceConfig := configuration.DeepCopy()
-	emptyResourceNamespaceConfig.ResourceNamespace = ""
-
-	differentNameConfig := configuration.DeepCopy()
-	differentNameConfig.LockObjectName = "name1"
-
-	differentNamespaceConfig := configuration.DeepCopy()
-	differentNamespaceConfig.LockObjectNamespace = "namespace1"
-
-	emptyconfig := &v1alpha2.KubeSchedulerLeaderElectionConfiguration{}
-
-	scenarios := map[string]struct {
-		expectedResourceNamespace string
-		expectedResourceName      string
-		expectedToFailed          bool
-		config                    *v1alpha2.KubeSchedulerLeaderElectionConfiguration
+func TestV1alpha2ToConfigKubeSchedulerConfigurationConversion(t *testing.T) {
+	cases := []struct {
+		name     string
+		config   v1alpha2.KubeSchedulerConfiguration
+		expected config.KubeSchedulerConfiguration
 	}{
-		"both-set-same-name-and-namespace": {
-			expectedResourceNamespace: "namespace",
-			expectedResourceName:      "name",
-			expectedToFailed:          false,
-			config:                    configuration,
-		},
-		"not-set-lock-object-name": {
-			expectedResourceNamespace: "namespace",
-			expectedResourceName:      "name",
-			expectedToFailed:          false,
-			config:                    emptyLockObjectNameConfig,
-		},
-		"not-set-lock-object-namespace": {
-			expectedResourceNamespace: "namespace",
-			expectedResourceName:      "name",
-			expectedToFailed:          false,
-			config:                    emptyLockObjectNamespaceConfig,
-		},
-		"not-set-resource-name": {
-			expectedResourceNamespace: "namespace",
-			expectedResourceName:      "name",
-			expectedToFailed:          false,
-			config:                    emptyResourceNameConfig,
-		},
-		"not-set-resource-namespace": {
-			expectedResourceNamespace: "namespace",
-			expectedResourceName:      "name",
-			expectedToFailed:          false,
-			config:                    emptyResourceNamespaceConfig,
-		},
-		"set-different-name": {
-			expectedResourceNamespace: "",
-			expectedResourceName:      "",
-			expectedToFailed:          true,
-			config:                    differentNameConfig,
-		},
-		"set-different-namespace": {
-			expectedResourceNamespace: "",
-			expectedResourceName:      "",
-			expectedToFailed:          true,
-			config:                    differentNamespaceConfig,
-		},
-		"set-empty-name-and-namespace": {
-			expectedResourceNamespace: "",
-			expectedResourceName:      "",
-			expectedToFailed:          false,
-			config:                    emptyconfig,
+		{
+			name:     "default conversion v1alpha2 to config",
+			config:   v1alpha2.KubeSchedulerConfiguration{},
+			expected: config.KubeSchedulerConfiguration{AlgorithmSource: config.SchedulerAlgorithmSource{Provider: pointer.StringPtr(v1alpha2.SchedulerDefaultProviderName)}},
 		},
 	}
-	for name, scenario := range scenarios {
-		out := &config.KubeSchedulerLeaderElectionConfiguration{}
-		s := conversion.Scope(nil)
-		err := Convert_v1alpha2_KubeSchedulerLeaderElectionConfiguration_To_config_KubeSchedulerLeaderElectionConfiguration(scenario.config, out, s)
-		if err == nil && scenario.expectedToFailed {
-			t.Errorf("Unexpected success for scenario: %s", name)
-		}
-		if err == nil && !scenario.expectedToFailed {
-			if out.ResourceName != scenario.expectedResourceName {
-				t.Errorf("Unexpected success for scenario: %s, out.ResourceName: %s, expectedResourceName: %s", name, out.ResourceName, scenario.expectedResourceName)
-			}
-			if out.ResourceNamespace != scenario.expectedResourceNamespace {
-				t.Errorf("Unexpected success for scenario: %s, out.ResourceNamespace: %s, expectedResourceNamespace: %s", name, out.ResourceNamespace, scenario.expectedResourceNamespace)
-			}
-		}
-		if err != nil && !scenario.expectedToFailed {
-			t.Errorf("Unexpected failure for scenario: %s - %+v", name, err)
-		}
-	}
-}
 
-func TestConfigToV1alpha1KubeSchedulerLeaderElectionConfiguration(t *testing.T) {
-	configuration := &config.KubeSchedulerLeaderElectionConfiguration{
-		LeaderElectionConfiguration: componentbaseconfig.LeaderElectionConfiguration{
-			ResourceName:      "name",
-			ResourceNamespace: "namespace",
-		},
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatal(err)
 	}
-	emptyconfig := &config.KubeSchedulerLeaderElectionConfiguration{}
-
-	scenarios := map[string]struct {
-		expectedResourceNamespace   string
-		expectedResourceName        string
-		expectedLockObjectNamespace string
-		expectedLockObjectName      string
-		expectedToFailed            bool
-		config                      *config.KubeSchedulerLeaderElectionConfiguration
-	}{
-		"both-set-name-and-namespace": {
-			expectedResourceNamespace:   "namespace",
-			expectedResourceName:        "name",
-			expectedLockObjectNamespace: "namespace",
-			expectedLockObjectName:      "name",
-			expectedToFailed:            false,
-			config:                      configuration,
-		},
-		"set-empty-name-and-namespace": {
-			expectedResourceNamespace:   "",
-			expectedResourceName:        "",
-			expectedLockObjectNamespace: "",
-			expectedLockObjectName:      "",
-			expectedToFailed:            false,
-			config:                      emptyconfig,
-		},
-	}
-	for name, scenario := range scenarios {
-		out := &v1alpha2.KubeSchedulerLeaderElectionConfiguration{}
-		s := conversion.Scope(nil)
-		err := Convert_config_KubeSchedulerLeaderElectionConfiguration_To_v1alpha2_KubeSchedulerLeaderElectionConfiguration(scenario.config, out, s)
-		if err == nil && scenario.expectedToFailed {
-			t.Errorf("Unexpected success for scenario: %s", name)
-		}
-		if err == nil && !scenario.expectedToFailed {
-			if out.ResourceName != scenario.expectedResourceName {
-				t.Errorf("Unexpected success for scenario: %s, out.ResourceName: %s, expectedResourceName: %s", name, out.ResourceName, scenario.expectedResourceName)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out config.KubeSchedulerConfiguration
+			if err := scheme.Convert(&tc.config, &out, nil); err != nil {
+				t.Errorf("failed to convert: %+v", err)
 			}
-			if out.LockObjectName != scenario.expectedLockObjectName {
-				t.Errorf("Unexpected success for scenario: %s, out.LockObjectName: %s, expectedLockObjectName: %s", name, out.LockObjectName, scenario.expectedLockObjectName)
+			if diff := cmp.Diff(tc.expected, out); diff != "" {
+				t.Errorf("unexpected conversion (-want, +got):\n%s", diff)
 			}
-			if out.ResourceNamespace != scenario.expectedResourceNamespace {
-				t.Errorf("Unexpected success for scenario: %s, out.ResourceNamespace: %s, expectedResourceNamespace: %s", name, out.ResourceNamespace, scenario.expectedResourceNamespace)
-			}
-			if out.LockObjectNamespace != scenario.expectedLockObjectNamespace {
-				t.Errorf("Unexpected success for scenario: %s, out.LockObjectNamespace: %s, expectedLockObjectNamespace: %s", name, out.LockObjectNamespace, scenario.expectedLockObjectNamespace)
-			}
-		}
-		if err != nil && !scenario.expectedToFailed {
-			t.Errorf("Unexpected failure for scenario: %s - %+v", name, err)
-		}
+		})
 	}
 }

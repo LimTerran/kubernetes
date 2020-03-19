@@ -116,7 +116,7 @@ func NewRuntimeOperationMonitor(c clientset.Interface) *RuntimeOperationMonitor 
 		client:          c,
 		nodesRuntimeOps: make(map[string]NodeRuntimeOperationErrorRate),
 	}
-	nodes, err := m.client.CoreV1().Nodes().List(metav1.ListOptions{})
+	nodes, err := m.client.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		framework.Failf("RuntimeOperationMonitor: unable to get list of nodes: %v", err)
 	}
@@ -216,7 +216,7 @@ func getNodeRuntimeOperationErrorRate(c clientset.Interface, node string) (NodeR
 
 // GetStatsSummary contacts kubelet for the container information.
 func GetStatsSummary(c clientset.Interface, nodeName string) (*kubeletstatsv1alpha1.Summary, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), e2emetrics.SingleCallTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), framework.SingleCallTimeout)
 	defer cancel()
 
 	data, err := c.CoreV1().RESTClient().Get().
@@ -478,7 +478,7 @@ func NewResourceMonitor(c clientset.Interface, containerNames []string, pollingI
 // Start starts collectors.
 func (r *ResourceMonitor) Start() {
 	// It should be OK to monitor unschedulable Nodes
-	nodes, err := r.client.CoreV1().Nodes().List(metav1.ListOptions{})
+	nodes, err := r.client.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		framework.Failf("ResourceMonitor: unable to get list of nodes: %v", err)
 	}

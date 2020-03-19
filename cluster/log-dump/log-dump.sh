@@ -41,7 +41,7 @@ readonly master_ssh_supported_providers="gce aws kubernetes-anywhere"
 readonly node_ssh_supported_providers="gce gke aws kubernetes-anywhere"
 readonly gcloud_supported_providers="gce gke kubernetes-anywhere"
 
-readonly master_logfiles="kube-apiserver.log kube-apiserver-audit.log kube-scheduler.log kube-controller-manager.log etcd.log etcd-events.log glbc.log cluster-autoscaler.log kube-addon-manager.log fluentd.log kubelet.cov"
+readonly master_logfiles="kube-apiserver.log kube-apiserver-audit.log kube-scheduler.log kube-controller-manager.log etcd.log etcd-events.log glbc.log cluster-autoscaler.log kube-addon-manager.log konnectivity-server.log fluentd.log kubelet.cov"
 readonly node_logfiles="kube-proxy.log fluentd.log node-problem-detector.log kubelet.cov"
 readonly node_systemd_services="node-problem-detector"
 readonly hollow_node_logfiles="kubelet-hollow-node-*.log kubeproxy-hollow-node-*.log npd-hollow-node-*.log"
@@ -218,11 +218,30 @@ function export-windows-docker-event-log() {
     done
 }
 
+# Saves prepulled Windows Docker images list to ${WINDOWS_LOGS_DIR}\docker_images.log
+# on node $1.
+function export-windows-docker-images-list() {
+    local -r node="${1}"
+
+    local -r powershell_cmd="powershell.exe -Command \"\$logs=\$(docker image list); \$logs | Out-File -FilePath '${WINDOWS_LOGS_DIR}\\docker_images.log'\""
+
+    # Retry up to 3 times to allow ssh keys to be properly propagated and
+    # stored.
+    for retry in {1..3}; do
+      if gcloud compute ssh --project "${PROJECT}" --zone "${ZONE}" "${node}" \
+        --command "$powershell_cmd"; then
+        break
+      else
+        sleep 10
+      fi
+    done
+}
+
 # Saves log files from diagnostics tool.(https://github.com/GoogleCloudPlatform/compute-image-tools/tree/master/cli_tools/diagnostics)
 function save-windows-logs-via-diagnostics-tool() {
     local node="${1}"
     local dest_dir="${2}"
-    
+
     gcloud compute instances add-metadata ${node} --metadata enable-diagnostics=true --project=${PROJECT} --zone=${ZONE}
     local logs_archive_in_gcs=$(gcloud alpha compute diagnose export-logs ${node} --zone=${ZONE} --project=${PROJECT} | tail -n 1)
     local temp_local_path="${node}.zip"
@@ -247,7 +266,8 @@ function save-windows-logs-via-ssh() {
     local dest_dir="${2}"
 
     export-windows-docker-event-log "${node}"
-
+    export-windows-docker-images-list "${node}"
+    
     local remote_files=()
     for file in ${windows_node_logfiles[@]}; do
       remote_files+=( "${WINDOWS_LOGS_DIR}\\${file}" )
@@ -435,7 +455,9 @@ function dump_nodes() {
 # Sets:
 #   NON_LOGEXPORTED_NODES
 function find_non_logexported_nodes() {
-  succeeded_nodes=$(gsutil ls ${gcs_artifacts_dir}/logexported-nodes-registry) || return 1
+  local file="${gcs_artifacts_dir}/logexported-nodes-registry"
+  echo "Listing marker files ($file) for successful nodes..."
+  succeeded_nodes=$(gsutil ls "${file}") || return 1
   echo "Successfully listed marker files for successful nodes"
   NON_LOGEXPORTED_NODES=()
   for node in "${NODE_NAMES[@]}"; do

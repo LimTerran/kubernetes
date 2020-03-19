@@ -24,6 +24,7 @@ import (
 	componentbaseconfigv1alpha1 "k8s.io/component-base/config/v1alpha1"
 	"k8s.io/kube-scheduler/config/v1alpha2"
 	"k8s.io/kubernetes/pkg/scheduler/apis/config"
+	"k8s.io/utils/pointer"
 
 	// this package shouldn't really depend on other k8s.io/kubernetes code
 	api "k8s.io/kubernetes/pkg/apis/core"
@@ -36,26 +37,13 @@ func addDefaultingFuncs(scheme *runtime.Scheme) error {
 
 // SetDefaults_KubeSchedulerConfiguration sets additional defaults
 func SetDefaults_KubeSchedulerConfiguration(obj *v1alpha2.KubeSchedulerConfiguration) {
-	if obj.SchedulerName == nil {
-		val := api.DefaultSchedulerName
-		obj.SchedulerName = &val
+	if len(obj.Profiles) == 0 {
+		obj.Profiles = append(obj.Profiles, v1alpha2.KubeSchedulerProfile{})
 	}
-
-	if obj.HardPodAffinitySymmetricWeight == nil {
-		val := api.DefaultHardPodAffinitySymmetricWeight
-		obj.HardPodAffinitySymmetricWeight = &val
-	}
-
-	if obj.AlgorithmSource.Policy == nil &&
-		(obj.AlgorithmSource.Provider == nil || len(*obj.AlgorithmSource.Provider) == 0) {
-		val := v1alpha2.SchedulerDefaultProviderName
-		obj.AlgorithmSource.Provider = &val
-	}
-
-	if policy := obj.AlgorithmSource.Policy; policy != nil {
-		if policy.ConfigMap != nil && len(policy.ConfigMap.Namespace) == 0 {
-			obj.AlgorithmSource.Policy.ConfigMap.Namespace = api.NamespaceSystem
-		}
+	// Only apply a default scheduler name when there is a single profile.
+	// Validation will ensure that every profile has a non-empty unique name.
+	if len(obj.Profiles) == 1 && obj.Profiles[0].SchedulerName == nil {
+		obj.Profiles[0].SchedulerName = pointer.StringPtr(api.DefaultSchedulerName)
 	}
 
 	// For Healthz and Metrics bind addresses, we want to check:
@@ -121,11 +109,11 @@ func SetDefaults_KubeSchedulerConfiguration(obj *v1alpha2.KubeSchedulerConfigura
 	if len(obj.LeaderElection.ResourceLock) == 0 {
 		obj.LeaderElection.ResourceLock = "endpointsleases"
 	}
-	if len(obj.LeaderElection.LockObjectNamespace) == 0 && len(obj.LeaderElection.ResourceNamespace) == 0 {
-		obj.LeaderElection.LockObjectNamespace = v1alpha2.SchedulerDefaultLockObjectNamespace
+	if len(obj.LeaderElection.ResourceNamespace) == 0 {
+		obj.LeaderElection.ResourceNamespace = v1alpha2.SchedulerDefaultLockObjectNamespace
 	}
-	if len(obj.LeaderElection.LockObjectName) == 0 && len(obj.LeaderElection.ResourceName) == 0 {
-		obj.LeaderElection.LockObjectName = v1alpha2.SchedulerDefaultLockObjectName
+	if len(obj.LeaderElection.ResourceName) == 0 {
+		obj.LeaderElection.ResourceName = v1alpha2.SchedulerDefaultLockObjectName
 	}
 
 	if len(obj.ClientConnection.ContentType) == 0 {

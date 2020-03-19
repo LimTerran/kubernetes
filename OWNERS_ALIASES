@@ -121,12 +121,25 @@ aliases:
     - justaugustus # SIG Chair
     - tpepper # SIG Chair / Patch Release Team
   release-engineering-reviewers:
-    - aleksandra-malinowska # Patch Release Team
     - calebamiles # SIG Chair
+    - cpanato # Branch Manager
     - feiskyer # Patch Release Team
     - hoegaarden # Patch Release Team
     - justaugustus # SIG Chair
+    - saschagrunert # Branch Manager
     - tpepper # SIG Chair / Patch Release Team
+  build-image-approvers:
+    - BenTheElder
+    - cblecker
+    - dims
+    - justaugustus
+    - listx
+  build-image-reviewers:
+    - BenTheElder
+    - cblecker
+    - dims
+    - justaugustus
+    - listx
 
   sig-storage-reviewers:
     - saad-ali
@@ -151,6 +164,7 @@ aliases:
     - hex108
     - alculquicondor
     - liu-cong
+    - damemi
 
   sig-cli-maintainers:
     - adohe
@@ -217,6 +231,12 @@ aliases:
     - yujuhong
     - krmayankk
     - mattjmcnaughton
+    - matthyx
+
+  sig-network-driver-approvers:
+    - dcbw
+    - freehan
+
   sig-network-approvers:
     - andrewsykim
     - bowei
@@ -454,7 +474,7 @@ aliases:
     - andrewsykim     # Cloud Provider
     - bgrant0607      # Architecture
     - brancz          # Instrumentation
-    - bsalamat        # Scheduling
+    - ahg-g           # Scheduling
     - calebamiles     # Release
     - caseydavenport  # Network
     - countspongebob  # Scalability
@@ -463,13 +483,11 @@ aliases:
     - dchen1107       # Node
     - deads2k         # API Machinery
     - derekwaynecarr  # Node
-    - dghubble        # On Premise
-    - jdumars         # Architecture, Cluster Ops, Release
+    - jdumars         # Architecture, Release
     - kow3ns          # Apps
     - lavalamp        # API Machinery
     - liggitt         # Auth
     - luxas           # Cluster Lifecycle
-    - marcoceppi      # On Premise
     - mattfarina      # Apps
     - michmike        # Windows
     - mwielgus        # Autoscaling
@@ -485,7 +503,6 @@ aliases:
     - thockin         # Network
     - timothysc       # Cluster Lifecycle, Scheduling
     - wojtek-t        # Scalability
-    - zehicle         # Cluster Ops
 
   # conformance aliases https://git.k8s.io/enhancements/keps/sig-architecture/20190412-conformance-behaviors.md
   conformance-behavior-approvers:

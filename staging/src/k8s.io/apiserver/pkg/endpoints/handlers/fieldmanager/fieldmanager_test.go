@@ -22,6 +22,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -33,9 +34,15 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apiserver/pkg/endpoints/handlers/fieldmanager"
+	"k8s.io/apiserver/pkg/endpoints/handlers/fieldmanager/internal"
+
 	"k8s.io/kube-openapi/pkg/util/proto"
 	prototesting "k8s.io/kube-openapi/pkg/util/proto/testing"
+	"sigs.k8s.io/structured-merge-diff/v3/fieldpath"
+	"sigs.k8s.io/structured-merge-diff/v3/merge"
+	"sigs.k8s.io/structured-merge-diff/v3/typed"
 	"sigs.k8s.io/yaml"
 )
 
@@ -45,9 +52,17 @@ var fakeSchema = prototesting.Fake{
 		"api", "openapi-spec", "swagger.json"),
 }
 
-type fakeObjectConvertor struct{}
+type fakeObjectConvertor struct {
+	converter  merge.Converter
+	apiVersion fieldpath.APIVersion
+}
 
 func (c *fakeObjectConvertor) Convert(in, out, context interface{}) error {
+	if typedValue, ok := in.(*typed.TypedValue); ok {
+		var err error
+		out, err = c.converter.Convert(typedValue, c.apiVersion)
+		return err
+	}
 	out = in
 	return nil
 }
@@ -71,18 +86,14 @@ type TestFieldManager struct {
 }
 
 func NewTestFieldManager(gvk schema.GroupVersionKind) TestFieldManager {
-	d, err := fakeSchema.OpenAPISchema()
-	if err != nil {
-		panic(err)
-	}
-	m, err := proto.NewOpenAPIData(d)
-	if err != nil {
-		panic(err)
-	}
+	m := NewFakeOpenAPIModels()
+	tc := NewFakeTypeConverter(m)
 
+	converter := internal.NewVersionConverter(tc, &fakeObjectConvertor{}, gvk.GroupVersion())
+	apiVersion := fieldpath.APIVersion(gvk.GroupVersion().String())
 	f, err := fieldmanager.NewStructuredMergeManager(
 		m,
-		&fakeObjectConvertor{},
+		&fakeObjectConvertor{converter, apiVersion},
 		&fakeObjectDefaulter{},
 		gvk.GroupVersion(),
 		gvk.GroupVersion(),
@@ -94,12 +105,33 @@ func NewTestFieldManager(gvk schema.GroupVersionKind) TestFieldManager {
 	live.SetKind(gvk.Kind)
 	live.SetAPIVersion(gvk.GroupVersion().String())
 	f = fieldmanager.NewStripMetaManager(f)
+	f = fieldmanager.NewManagedFieldsUpdater(f)
 	f = fieldmanager.NewBuildManagerInfoManager(f, gvk.GroupVersion())
 	return TestFieldManager{
 		fieldManager: f,
 		emptyObj:     live,
 		liveObj:      live.DeepCopyObject(),
 	}
+}
+
+func NewFakeTypeConverter(m proto.Models) internal.TypeConverter {
+	tc, err := internal.NewTypeConverter(m, false)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to build TypeConverter: %v", err))
+	}
+	return tc
+}
+
+func NewFakeOpenAPIModels() proto.Models {
+	d, err := fakeSchema.OpenAPISchema()
+	if err != nil {
+		panic(err)
+	}
+	m, err := proto.NewOpenAPIData(d)
+	if err != nil {
+		panic(err)
+	}
+	return m
 }
 
 func (f *TestFieldManager) Reset() {
@@ -393,29 +425,52 @@ func BenchmarkNewObject(b *testing.B) {
 			obj: getObjectBytes("endpoints.yaml"),
 		},
 	}
-
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		b.Fatalf("Failed to add to scheme: %v", err)
+	}
 	for _, test := range tests {
 		b.Run(test.gvk.Kind, func(b *testing.B) {
 			f := NewTestFieldManager(test.gvk)
 
-			newObj := &unstructured.Unstructured{Object: map[string]interface{}{}}
-			if err := yaml.Unmarshal(test.obj, &newObj.Object); err != nil {
+			decoder := serializer.NewCodecFactory(scheme).UniversalDecoder(test.gvk.GroupVersion())
+			newObj, err := runtime.Decode(decoder, test.obj)
+			if err != nil {
 				b.Fatalf("Failed to parse yaml object: %v", err)
 			}
-			newObj.SetManagedFields([]metav1.ManagedFieldsEntry{
+			objMeta, err := meta.Accessor(newObj)
+			if err != nil {
+				b.Fatalf("Failed to get object meta: %v", err)
+			}
+			objMeta.SetManagedFields([]metav1.ManagedFieldsEntry{
 				{
 					Manager:    "default",
 					Operation:  "Update",
 					APIVersion: "v1",
 				},
 			})
-
+			appliedObj := &unstructured.Unstructured{Object: map[string]interface{}{}}
+			if err := yaml.Unmarshal(test.obj, &appliedObj.Object); err != nil {
+				b.Fatalf("Failed to parse yaml object: %v", err)
+			}
 			b.Run("Update", func(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 				for n := 0; n < b.N; n++ {
-					err := f.Update(newObj, "fieldmanager_test")
-					if err != nil {
+					if err := f.Update(newObj, "fieldmanager_test"); err != nil {
+						b.Fatal(err)
+					}
+					f.Reset()
+				}
+			})
+			b.Run("UpdateTwice", func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+				for n := 0; n < b.N; n++ {
+					if err := f.Update(newObj, "fieldmanager_test"); err != nil {
+						b.Fatal(err)
+					}
+					if err := f.Update(newObj, "fieldmanager_test_2"); err != nil {
 						b.Fatal(err)
 					}
 					f.Reset()
@@ -425,16 +480,170 @@ func BenchmarkNewObject(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 				for n := 0; n < b.N; n++ {
-					appliedObj := &unstructured.Unstructured{Object: map[string]interface{}{}}
-					if err := yaml.Unmarshal(test.obj, &appliedObj.Object); err != nil {
-						b.Fatalf("error decoding YAML: %v", err)
-					}
-					err := f.Apply(appliedObj, "fieldmanager_test", false)
-					if err != nil {
+					if err := f.Apply(appliedObj, "fieldmanager_test", false); err != nil {
 						b.Fatal(err)
 					}
 					f.Reset()
 				}
+			})
+			b.Run("UpdateApply", func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+				for n := 0; n < b.N; n++ {
+					if err := f.Update(newObj, "fieldmanager_test"); err != nil {
+						b.Fatal(err)
+					}
+					if err := f.Apply(appliedObj, "fieldmanager_test", false); err != nil {
+						b.Fatal(err)
+					}
+					f.Reset()
+				}
+			})
+		})
+	}
+}
+
+func toUnstructured(b *testing.B, o runtime.Object) *unstructured.Unstructured {
+	u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
+	if err != nil {
+		b.Fatalf("Failed to unmarshal to json: %v", err)
+	}
+	return &unstructured.Unstructured{Object: u}
+}
+
+func BenchmarkConvertObjectToTyped(b *testing.B) {
+	tests := []struct {
+		gvk schema.GroupVersionKind
+		obj []byte
+	}{
+		{
+			gvk: schema.FromAPIVersionAndKind("v1", "Pod"),
+			obj: getObjectBytes("pod.yaml"),
+		},
+		{
+			gvk: schema.FromAPIVersionAndKind("v1", "Node"),
+			obj: getObjectBytes("node.yaml"),
+		},
+		{
+			gvk: schema.FromAPIVersionAndKind("v1", "Endpoints"),
+			obj: getObjectBytes("endpoints.yaml"),
+		},
+	}
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		b.Fatalf("Failed to add to scheme: %v", err)
+	}
+
+	for _, test := range tests {
+		b.Run(test.gvk.Kind, func(b *testing.B) {
+			decoder := serializer.NewCodecFactory(scheme).UniversalDecoder(test.gvk.GroupVersion())
+			m := NewFakeOpenAPIModels()
+			typeConverter := NewFakeTypeConverter(m)
+
+			structured, err := runtime.Decode(decoder, test.obj)
+			if err != nil {
+				b.Fatalf("Failed to parse yaml object: %v", err)
+			}
+			b.Run("structured", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						_, err := typeConverter.ObjectToTyped(structured)
+						if err != nil {
+							b.Errorf("Error in ObjectToTyped: %v", err)
+						}
+					}
+				})
+			})
+
+			unstructured := toUnstructured(b, structured)
+			b.Run("unstructured", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						_, err := typeConverter.ObjectToTyped(unstructured)
+						if err != nil {
+							b.Errorf("Error in ObjectToTyped: %v", err)
+						}
+					}
+				})
+			})
+		})
+	}
+}
+
+func BenchmarkCompare(b *testing.B) {
+	tests := []struct {
+		gvk schema.GroupVersionKind
+		obj []byte
+	}{
+		{
+			gvk: schema.FromAPIVersionAndKind("v1", "Pod"),
+			obj: getObjectBytes("pod.yaml"),
+		},
+		{
+			gvk: schema.FromAPIVersionAndKind("v1", "Node"),
+			obj: getObjectBytes("node.yaml"),
+		},
+		{
+			gvk: schema.FromAPIVersionAndKind("v1", "Endpoints"),
+			obj: getObjectBytes("endpoints.yaml"),
+		},
+	}
+
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		b.Fatalf("Failed to add to scheme: %v", err)
+	}
+
+	for _, test := range tests {
+		b.Run(test.gvk.Kind, func(b *testing.B) {
+			decoder := serializer.NewCodecFactory(scheme).UniversalDecoder(test.gvk.GroupVersion())
+			m := NewFakeOpenAPIModels()
+			typeConverter := NewFakeTypeConverter(m)
+
+			structured, err := runtime.Decode(decoder, test.obj)
+			if err != nil {
+				b.Fatal(err)
+			}
+			tv1, err := typeConverter.ObjectToTyped(structured)
+			if err != nil {
+				b.Errorf("Error in ObjectToTyped: %v", err)
+			}
+			tv2, err := typeConverter.ObjectToTyped(structured)
+			if err != nil {
+				b.Errorf("Error in ObjectToTyped: %v", err)
+			}
+
+			b.Run("structured", func(b *testing.B) {
+				b.ReportAllocs()
+				for n := 0; n < b.N; n++ {
+					_, err = tv1.Compare(tv2)
+					if err != nil {
+						b.Errorf("Error in ObjectToTyped: %v", err)
+					}
+				}
+			})
+
+			unstructured := toUnstructured(b, structured)
+			utv1, err := typeConverter.ObjectToTyped(unstructured)
+			if err != nil {
+				b.Errorf("Error in ObjectToTyped: %v", err)
+			}
+			utv2, err := typeConverter.ObjectToTyped(unstructured)
+			if err != nil {
+				b.Errorf("Error in ObjectToTyped: %v", err)
+			}
+			b.Run("unstructured", func(b *testing.B) {
+				b.ReportAllocs()
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						_, err = utv1.Compare(utv2)
+						if err != nil {
+							b.Errorf("Error in ObjectToTyped: %v", err)
+						}
+					}
+				})
 			})
 		})
 	}
@@ -523,5 +732,54 @@ func TestApplySuccessWithNoManagedFields(t *testing.T) {
 
 	if err != nil {
 		t.Fatalf("failed to apply object: %v", err)
+	}
+}
+
+// Run an update and apply, and make sure that nothing has changed.
+func TestNoOpChanges(t *testing.T) {
+	f := NewTestFieldManager(schema.FromAPIVersionAndKind("v1", "Pod"))
+
+	obj := &unstructured.Unstructured{Object: map[string]interface{}{}}
+	if err := yaml.Unmarshal([]byte(`{
+		"apiVersion": "v1",
+		"kind": "Pod",
+		"metadata": {
+			"labels": {
+				"a": "b"
+			},
+		}
+	}`), &obj.Object); err != nil {
+		t.Fatalf("error decoding YAML: %v", err)
+	}
+	if err := f.Apply(obj, "fieldmanager_test_apply", false); err != nil {
+		t.Fatalf("failed to apply object: %v", err)
+	}
+	before := f.liveObj.DeepCopyObject()
+	// Wait to make sure the timestamp is different
+	time.Sleep(time.Second)
+	// Applying with a different fieldmanager will create an entry..
+	if err := f.Apply(obj, "fieldmanager_test_apply_other", false); err != nil {
+		t.Fatalf("failed to update object: %v", err)
+	}
+	if reflect.DeepEqual(before, f.liveObj) {
+		t.Fatalf("Applying no-op apply with new manager didn't change object: \n%v", f.liveObj)
+	}
+	before = f.liveObj.DeepCopyObject()
+	// Wait to make sure the timestamp is different
+	time.Sleep(time.Second)
+	if err := f.Update(obj, "fieldmanager_test_update"); err != nil {
+		t.Fatalf("failed to update object: %v", err)
+	}
+	if !reflect.DeepEqual(before, f.liveObj) {
+		t.Fatalf("No-op update has changed the object:\n%v\n---\n%v", before, f.liveObj)
+	}
+	before = f.liveObj.DeepCopyObject()
+	// Wait to make sure the timestamp is different
+	time.Sleep(time.Second)
+	if err := f.Apply(obj, "fieldmanager_test_apply", true); err != nil {
+		t.Fatalf("failed to re-apply object: %v", err)
+	}
+	if !reflect.DeepEqual(before, f.liveObj) {
+		t.Fatalf("No-op apply has changed the object:\n%v\n---\n%v", before, f.liveObj)
 	}
 }

@@ -188,9 +188,9 @@ func (p *staticPolicy) assignableCPUs(s state.State) cpuset.CPUSet {
 	return s.GetDefaultCPUSet().Difference(p.reserved)
 }
 
-func (p *staticPolicy) AddContainer(s state.State, pod *v1.Pod, container *v1.Container) error {
+func (p *staticPolicy) Allocate(s state.State, pod *v1.Pod, container *v1.Container) error {
 	if numCPUs := p.guaranteedCPUs(pod, container); numCPUs != 0 {
-		klog.Infof("[cpumanager] static policy: AddContainer (pod: %s, container: %s)", pod.Name, container.Name)
+		klog.Infof("[cpumanager] static policy: Allocate (pod: %s, container: %s)", pod.Name, container.Name)
 		// container belongs in an exclusively allocated pool
 
 		if _, ok := s.GetCPUSet(string(pod.UID), container.Name); ok {
@@ -209,6 +209,17 @@ func (p *staticPolicy) AddContainer(s state.State, pod *v1.Pod, container *v1.Co
 			return err
 		}
 		s.SetCPUSet(string(pod.UID), container.Name, cpuset)
+
+		// Check if the container that has just been allocated resources is an init container.
+		// If so, release its CPUs back into the shared pool so they can be reallocated.
+		for _, initContainer := range pod.Spec.InitContainers {
+			if container.Name == initContainer.Name {
+				if toRelease, ok := s.GetCPUSet(string(pod.UID), container.Name); ok {
+					// Mutate the shared pool, adding released cpus.
+					s.SetDefaultCPUSet(s.GetDefaultCPUSet().Union(toRelease))
+				}
+			}
+		}
 	}
 	// container belongs in the shared pool (nothing to do; use default cpuset)
 	return nil
@@ -276,7 +287,7 @@ func (p *staticPolicy) guaranteedCPUs(pod *v1.Pod, container *v1.Container) int 
 	return int(cpuQuantity.Value())
 }
 
-func (p *staticPolicy) GetTopologyHints(s state.State, pod v1.Pod, container v1.Container) map[string][]topologymanager.TopologyHint {
+func (p *staticPolicy) GetTopologyHints(s state.State, pod *v1.Pod, container *v1.Container) map[string][]topologymanager.TopologyHint {
 	// If there are no CPU resources requested for this container, we do not
 	// generate any topology hints.
 	if _, ok := container.Resources.Requests[v1.ResourceCPU]; !ok {
@@ -284,7 +295,7 @@ func (p *staticPolicy) GetTopologyHints(s state.State, pod v1.Pod, container v1.
 	}
 
 	// Get a count of how many guaranteed CPUs have been requested.
-	requested := p.guaranteedCPUs(&pod, &container)
+	requested := p.guaranteedCPUs(pod, container)
 
 	// If there are no guaranteed CPUs being requested, we do not generate
 	// any topology hints. This can happen, for example, because init

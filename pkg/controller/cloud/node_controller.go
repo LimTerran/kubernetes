@@ -36,10 +36,10 @@ import (
 	"k8s.io/client-go/tools/record"
 	clientretry "k8s.io/client-go/util/retry"
 	cloudprovider "k8s.io/cloud-provider"
+	cloudproviderapi "k8s.io/cloud-provider/api"
 	cloudnodeutil "k8s.io/cloud-provider/node/helpers"
 	"k8s.io/klog"
 	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
-	schedulerapi "k8s.io/kubernetes/pkg/scheduler/api"
 	nodeutil "k8s.io/kubernetes/pkg/util/node"
 )
 
@@ -154,7 +154,7 @@ func (cnc *CloudNodeController) UpdateNodeStatus(ctx context.Context) {
 		return
 	}
 
-	nodes, err := cnc.kubeClient.CoreV1().Nodes().List(metav1.ListOptions{ResourceVersion: "0"})
+	nodes, err := cnc.kubeClient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{ResourceVersion: "0"})
 	if err != nil {
 		klog.Errorf("Error monitoring node status: %v", err)
 		return
@@ -352,7 +352,7 @@ func (cnc *CloudNodeController) initializeNode(ctx context.Context, node *v1.Nod
 		return
 	}
 
-	curNode, err := cnc.kubeClient.CoreV1().Nodes().Get(node.Name, metav1.GetOptions{})
+	curNode, err := cnc.kubeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("failed to get node %s: %v", node.Name, err))
 		return
@@ -376,7 +376,7 @@ func (cnc *CloudNodeController) initializeNode(ctx context.Context, node *v1.Nod
 	})
 
 	err = clientretry.RetryOnConflict(UpdateNodeSpecBackoff, func() error {
-		curNode, err := cnc.kubeClient.CoreV1().Nodes().Get(node.Name, metav1.GetOptions{})
+		curNode, err := cnc.kubeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -385,7 +385,7 @@ func (cnc *CloudNodeController) initializeNode(ctx context.Context, node *v1.Nod
 			modify(curNode)
 		}
 
-		_, err = cnc.kubeClient.CoreV1().Nodes().Update(curNode)
+		_, err = cnc.kubeClient.CoreV1().Nodes().Update(context.TODO(), curNode, metav1.UpdateOptions{})
 		if err != nil {
 			return err
 		}
@@ -491,7 +491,7 @@ func (cnc *CloudNodeController) getNodeModifiersFromCloudProvider(ctx context.Co
 
 func getCloudTaint(taints []v1.Taint) *v1.Taint {
 	for _, taint := range taints {
-		if taint.Key == schedulerapi.TaintExternalCloudProvider {
+		if taint.Key == cloudproviderapi.TaintExternalCloudProvider {
 			return &taint
 		}
 	}
@@ -501,7 +501,7 @@ func getCloudTaint(taints []v1.Taint) *v1.Taint {
 func excludeCloudTaint(taints []v1.Taint) []v1.Taint {
 	newTaints := []v1.Taint{}
 	for _, taint := range taints {
-		if taint.Key == schedulerapi.TaintExternalCloudProvider {
+		if taint.Key == cloudproviderapi.TaintExternalCloudProvider {
 			continue
 		}
 		newTaints = append(newTaints, taint)

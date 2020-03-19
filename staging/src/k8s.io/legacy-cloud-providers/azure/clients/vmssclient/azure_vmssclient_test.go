@@ -26,7 +26,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-07-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-12-01/compute"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/golang/mock/gomock"
@@ -116,6 +116,29 @@ func TestCreateOrUpdate(t *testing.T) {
 
 	vmssClient := getTestVMSSClient(armClient)
 	rerr := vmssClient.CreateOrUpdate(context.TODO(), "rg", "vmss1", vmss)
+	assert.Nil(t, rerr)
+}
+
+func TestDeleteInstances(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	r := getTestVMSS("vmss1")
+	vmInstanceIDs := compute.VirtualMachineScaleSetVMInstanceRequiredIDs{
+		InstanceIds: &[]string{"0", "1", "2"},
+	}
+	response := &http.Response{
+		StatusCode: http.StatusOK,
+		Request:    &http.Request{Method: "POST"},
+		Body:       ioutil.NopCloser(bytes.NewReader([]byte("{}"))),
+	}
+	armClient := mockarmclient.NewMockInterface(ctrl)
+	armClient.EXPECT().PostResource(gomock.Any(), to.String(r.ID), "delete", vmInstanceIDs).Return(response, nil).Times(1)
+	armClient.EXPECT().CloseResponse(gomock.Any(), gomock.Any()).Times(1)
+	armClient.EXPECT().WaitForAsyncOperationCompletion(gomock.Any(), gomock.Any(), "vmssclient.DeleteInstances").Return(nil).Times(1)
+
+	client := getTestVMSSClient(armClient)
+	rerr := client.DeleteInstances(context.TODO(), "rg", "vmss1", vmInstanceIDs)
 	assert.Nil(t, rerr)
 }
 

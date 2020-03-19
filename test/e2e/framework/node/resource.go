@@ -17,6 +17,7 @@ limitations under the License.
 package node
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -40,7 +41,6 @@ const (
 
 	// singleCallTimeout is how long to try single API calls (like 'get' or 'list'). Used to prevent
 	// transient failures from failing tests.
-	// TODO: client should not apply this timeout to Watch calls. Increased from 30s until that is fixed.
 	singleCallTimeout = 5 * time.Minute
 
 	// ssh port
@@ -67,7 +67,6 @@ func FirstAddress(nodelist *v1.NodeList, addrType v1.NodeAddressType) string {
 	return ""
 }
 
-// TODO: better to change to a easy read name
 func isNodeConditionSetAsExpected(node *v1.Node, conditionType v1.NodeConditionType, wantTrue, silent bool) bool {
 	// Check the node readiness condition (logging all).
 	for _, cond := range node.Status.Conditions {
@@ -138,8 +137,8 @@ func IsConditionSetAsExpectedSilent(node *v1.Node, conditionType v1.NodeConditio
 	return isNodeConditionSetAsExpected(node, conditionType, wantTrue, true)
 }
 
-// IsConditionUnset returns true if conditions of the given node do not have a match to the given conditionType, otherwise false.
-func IsConditionUnset(node *v1.Node, conditionType v1.NodeConditionType) bool {
+// isConditionUnset returns true if conditions of the given node do not have a match to the given conditionType, otherwise false.
+func isConditionUnset(node *v1.Node, conditionType v1.NodeConditionType) bool {
 	for _, cond := range node.Status.Conditions {
 		if cond.Type == conditionType {
 			return false
@@ -207,11 +206,9 @@ func GetExternalIP(node *v1.Node) (string, error) {
 func GetInternalIP(node *v1.Node) (string, error) {
 	host := ""
 	for _, address := range node.Status.Addresses {
-		if address.Type == v1.NodeInternalIP {
-			if address.Address != "" {
-				host = net.JoinHostPort(address.Address, sshPort)
-				break
-			}
+		if address.Type == v1.NodeInternalIP && address.Address != "" {
+			host = net.JoinHostPort(address.Address, sshPort)
+			break
 		}
 	}
 	if host == "" {
@@ -278,7 +275,7 @@ func GetReadySchedulableNodes(c clientset.Interface) (nodes *v1.NodeList, err er
 		return nil, fmt.Errorf("listing schedulable nodes error: %s", err)
 	}
 	Filter(nodes, func(node v1.Node) bool {
-		return IsNodeSchedulable(&node) && IsNodeUntainted(&node)
+		return IsNodeSchedulable(&node) && isNodeUntainted(&node)
 	})
 	if len(nodes.Items) == 0 {
 		return nil, fmt.Errorf("there are currently no ready, schedulable nodes in the cluster")
@@ -336,23 +333,23 @@ func GetReadyNodesIncludingTainted(c clientset.Interface) (nodes *v1.NodeList, e
 func GetMasterAndWorkerNodes(c clientset.Interface) (sets.String, *v1.NodeList, error) {
 	nodes := &v1.NodeList{}
 	masters := sets.NewString()
-	all, err := c.CoreV1().Nodes().List(metav1.ListOptions{})
+	all, err := c.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		return nil, nil, fmt.Errorf("get nodes error: %s", err)
 	}
 	for _, n := range all.Items {
 		if system.DeprecatedMightBeMasterNode(n.Name) {
 			masters.Insert(n.Name)
-		} else if IsNodeSchedulable(&n) && IsNodeUntainted(&n) {
+		} else if IsNodeSchedulable(&n) && isNodeUntainted(&n) {
 			nodes.Items = append(nodes.Items, n)
 		}
 	}
 	return masters, nodes, nil
 }
 
-// IsNodeUntainted tests whether a fake pod can be scheduled on "node", given its current taints.
+// isNodeUntainted tests whether a fake pod can be scheduled on "node", given its current taints.
 // TODO: need to discuss wether to return bool and error type
-func IsNodeUntainted(node *v1.Node) bool {
+func isNodeUntainted(node *v1.Node) bool {
 	return isNodeUntaintedWithNonblocking(node, "")
 }
 
@@ -427,7 +424,7 @@ func IsNodeSchedulable(node *v1.Node) bool {
 // 2) doesn't have NetworkUnavailable condition set to true
 func IsNodeReady(node *v1.Node) bool {
 	nodeReady := IsConditionSetAsExpected(node, v1.NodeReady, true)
-	networkReady := IsConditionUnset(node, v1.NodeNetworkUnavailable) ||
+	networkReady := isConditionUnset(node, v1.NodeNetworkUnavailable) ||
 		IsConditionSetAsExpectedSilent(node, v1.NodeNetworkUnavailable, false)
 	return nodeReady && networkReady
 }
@@ -460,7 +457,7 @@ func hasNonblockingTaint(node *v1.Node, nonblockingTaints string) bool {
 func PodNodePairs(c clientset.Interface, ns string) ([]PodNode, error) {
 	var result []PodNode
 
-	podList, err := c.CoreV1().Pods(ns).List(metav1.ListOptions{})
+	podList, err := c.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		return result, err
 	}
@@ -473,4 +470,25 @@ func PodNodePairs(c clientset.Interface, ns string) ([]PodNode, error) {
 	}
 
 	return result, nil
+}
+
+// GetClusterZones returns the values of zone label collected from all nodes.
+func GetClusterZones(c clientset.Interface) (sets.String, error) {
+	nodes, err := c.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("Error getting nodes while attempting to list cluster zones: %v", err)
+	}
+
+	// collect values of zone label from all nodes
+	zones := sets.NewString()
+	for _, node := range nodes.Items {
+		if zone, found := node.Labels[v1.LabelZoneFailureDomain]; found {
+			zones.Insert(zone)
+		}
+
+		if zone, found := node.Labels[v1.LabelZoneFailureDomainStable]; found {
+			zones.Insert(zone)
+		}
+	}
+	return zones, nil
 }

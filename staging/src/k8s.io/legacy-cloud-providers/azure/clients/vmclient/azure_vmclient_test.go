@@ -27,7 +27,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-07-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-12-01/compute"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/golang/mock/gomock"
@@ -136,6 +136,19 @@ func TestCreateOrUpdate(t *testing.T) {
 
 	vmClient := getTestVMClient(armClient)
 	rerr := vmClient.CreateOrUpdate(context.TODO(), "rg", "vm1", testVM, "test")
+	assert.Nil(t, rerr)
+}
+
+func TestDelete(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	r := getTestVM("vm1")
+	armClient := mockarmclient.NewMockInterface(ctrl)
+	armClient.EXPECT().DeleteResource(gomock.Any(), to.String(r.ID), "").Return(nil).Times(1)
+
+	client := getTestVMClient(armClient)
+	rerr := client.Delete(context.TODO(), "rg", "vm1")
 	assert.Nil(t, rerr)
 }
 

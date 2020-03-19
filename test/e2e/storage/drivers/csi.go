@@ -36,6 +36,7 @@ limitations under the License.
 package drivers
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"time"
@@ -43,7 +44,6 @@ import (
 	"github.com/onsi/ginkgo"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
-	storagev1beta1 "k8s.io/api/storage/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -52,6 +52,7 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
+	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	"k8s.io/kubernetes/test/e2e/framework/volume"
 	"k8s.io/kubernetes/test/e2e/storage/testpatterns"
@@ -174,10 +175,10 @@ func (h *hostpathCSIDriver) PrepareTest(f *framework.Framework) (*testsuites.Per
 	node, err := e2enode.GetRandomReadySchedulableNode(cs)
 	framework.ExpectNoError(err)
 	config := &testsuites.PerTestConfig{
-		Driver:         h,
-		Prefix:         "hostpath",
-		Framework:      f,
-		ClientNodeName: node.Name,
+		Driver:              h,
+		Prefix:              "hostpath",
+		Framework:           f,
+		ClientNodeSelection: e2epod.NodeSelection{Name: node.Name},
 	}
 
 	o := utils.PatchCSIOptions{
@@ -298,10 +299,10 @@ func (m *mockCSIDriver) PrepareTest(f *framework.Framework) (*testsuites.PerTest
 	node, err := e2enode.GetRandomReadySchedulableNode(cs)
 	framework.ExpectNoError(err)
 	config := &testsuites.PerTestConfig{
-		Driver:         m,
-		Prefix:         "mock",
-		Framework:      f,
-		ClientNodeName: node.Name,
+		Driver:              m,
+		Prefix:              "mock",
+		Framework:           f,
+		ClientNodeSelection: e2epod.NodeSelection{Name: node.Name},
 	}
 
 	containerArgs := []string{"--name=csi-mock-" + f.UniqueName}
@@ -323,12 +324,12 @@ func (m *mockCSIDriver) PrepareTest(f *framework.Framework) (*testsuites.PerTest
 		DriverContainerName:      "mock",
 		DriverContainerArguments: containerArgs,
 		ProvisionerContainerName: "csi-provisioner",
-		NodeName:                 config.ClientNodeName,
+		NodeName:                 node.Name,
 		PodInfo:                  m.podInfo,
 		CanAttach:                &m.attachable,
-		VolumeLifecycleModes: &[]storagev1beta1.VolumeLifecycleMode{
-			storagev1beta1.VolumeLifecyclePersistent,
-			storagev1beta1.VolumeLifecycleEphemeral,
+		VolumeLifecycleModes: &[]storagev1.VolumeLifecycleMode{
+			storagev1.VolumeLifecyclePersistent,
+			storagev1.VolumeLifecycleEphemeral,
 		},
 	}
 	cleanup, err := utils.CreateFromManifests(f, func(item interface{}) error {
@@ -492,7 +493,7 @@ func waitForCSIDriverRegistrationOnNode(nodeName string, driverName string, cs c
 	const csiNodeRegisterTimeout = 1 * time.Minute
 
 	waitErr := wait.PollImmediate(10*time.Second, csiNodeRegisterTimeout, func() (bool, error) {
-		csiNode, err := cs.StorageV1().CSINodes().Get(nodeName, metav1.GetOptions{})
+		csiNode, err := cs.StorageV1().CSINodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 		if err != nil && !apierrors.IsNotFound(err) {
 			return false, err
 		}

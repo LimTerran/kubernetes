@@ -17,6 +17,7 @@ limitations under the License.
 package csi
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -81,7 +82,7 @@ func markVolumeAttached(t *testing.T, client clientset.Interface, watch *watch.R
 	defer ticker.Stop()
 	// wait for attachment to be saved
 	for i := 0; i < 100; i++ {
-		attach, err = client.StorageV1().VolumeAttachments().Get(attachID, meta.GetOptions{})
+		attach, err = client.StorageV1().VolumeAttachments().Get(context.TODO(), attachID, meta.GetOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				<-ticker.C
@@ -101,7 +102,7 @@ func markVolumeAttached(t *testing.T, client clientset.Interface, watch *watch.R
 	} else {
 		attach.Status = status
 		t.Logf("updating attachment %s with attach status %v", attachID, status)
-		_, err := client.StorageV1().VolumeAttachments().Update(attach)
+		_, err := client.StorageV1().VolumeAttachments().Update(context.TODO(), attach, metav1.UpdateOptions{})
 		if err != nil {
 			t.Error(err)
 		}
@@ -314,8 +315,6 @@ func TestAttacherAttachWithInline(t *testing.T) {
 }
 
 func TestAttacherWithCSIDriver(t *testing.T) {
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.CSIDriverRegistry, true)()
-
 	tests := []struct {
 		name                   string
 		driver                 string
@@ -399,8 +398,6 @@ func TestAttacherWithCSIDriver(t *testing.T) {
 }
 
 func TestAttacherWaitForVolumeAttachmentWithCSIDriver(t *testing.T) {
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.CSIDriverRegistry, true)()
-
 	// In order to detect if the volume plugin would skip WaitForAttach for non-attachable drivers,
 	// we do not instantiate any VolumeAttachment. So if the plugin does not skip attach,  WaitForVolumeAttachment
 	// will return an error that volume attachment was not found.
@@ -529,11 +526,11 @@ func TestAttacherWaitForAttach(t *testing.T) {
 
 			if test.makeAttachment != nil {
 				attachment := test.makeAttachment()
-				_, err = csiAttacher.k8s.StorageV1().VolumeAttachments().Create(attachment)
+				_, err = csiAttacher.k8s.StorageV1().VolumeAttachments().Create(context.TODO(), attachment, metav1.CreateOptions{})
 				if err != nil {
 					t.Fatalf("failed to create VolumeAttachment: %v", err)
 				}
-				gotAttachment, err := csiAttacher.k8s.StorageV1().VolumeAttachments().Get(attachment.Name, meta.GetOptions{})
+				gotAttachment, err := csiAttacher.k8s.StorageV1().VolumeAttachments().Get(context.TODO(), attachment.Name, meta.GetOptions{})
 				if err != nil {
 					t.Fatalf("failed to get created VolumeAttachment: %v", err)
 				}
@@ -611,11 +608,11 @@ func TestAttacherWaitForAttachWithInline(t *testing.T) {
 
 			if test.makeAttachment != nil {
 				attachment := test.makeAttachment()
-				_, err = csiAttacher.k8s.StorageV1().VolumeAttachments().Create(attachment)
+				_, err = csiAttacher.k8s.StorageV1().VolumeAttachments().Create(context.TODO(), attachment, metav1.CreateOptions{})
 				if err != nil {
 					t.Fatalf("failed to create VolumeAttachment: %v", err)
 				}
-				gotAttachment, err := csiAttacher.k8s.StorageV1().VolumeAttachments().Get(attachment.Name, meta.GetOptions{})
+				gotAttachment, err := csiAttacher.k8s.StorageV1().VolumeAttachments().Get(context.TODO(), attachment.Name, meta.GetOptions{})
 				if err != nil {
 					t.Fatalf("failed to get created VolumeAttachment: %v", err)
 				}
@@ -702,7 +699,7 @@ func TestAttacherWaitForVolumeAttachment(t *testing.T) {
 			attachment := makeTestAttachment(attachID, nodeName, pvName)
 			attachment.Status.Attached = tc.initAttached
 			attachment.Status.AttachError = tc.initAttachErr
-			_, err = csiAttacher.k8s.StorageV1().VolumeAttachments().Create(attachment)
+			_, err = csiAttacher.k8s.StorageV1().VolumeAttachments().Create(context.TODO(), attachment, metav1.CreateOptions{})
 			if err != nil {
 				t.Fatalf("failed to attach: %v", err)
 			}
@@ -800,7 +797,7 @@ func TestAttacherVolumesAreAttached(t *testing.T) {
 				attachID := getAttachmentName(attachedSpec.volName, testDriver, nodeName)
 				attachment := makeTestAttachment(attachID, nodeName, attachedSpec.spec.Name())
 				attachment.Status.Attached = attachedSpec.attached
-				_, err := csiAttacher.k8s.StorageV1().VolumeAttachments().Create(attachment)
+				_, err := csiAttacher.k8s.StorageV1().VolumeAttachments().Create(context.TODO(), attachment, metav1.CreateOptions{})
 				if err != nil {
 					t.Fatalf("failed to attach: %v", err)
 				}
@@ -871,7 +868,7 @@ func TestAttacherVolumesAreAttachedWithInline(t *testing.T) {
 				attachID := getAttachmentName(attachedSpec.volName, testDriver, nodeName)
 				attachment := makeTestAttachment(attachID, nodeName, attachedSpec.spec.Name())
 				attachment.Status.Attached = attachedSpec.attached
-				_, err := csiAttacher.k8s.StorageV1().VolumeAttachments().Create(attachment)
+				_, err := csiAttacher.k8s.StorageV1().VolumeAttachments().Create(context.TODO(), attachment, metav1.CreateOptions{})
 				if err != nil {
 					t.Fatalf("failed to attach: %v", err)
 				}
@@ -959,7 +956,7 @@ func TestAttacherDetach(t *testing.T) {
 			pv := makeTestPV("test-pv", 10, testDriver, tc.volID)
 			spec := volume.NewSpecFromPersistentVolume(pv, pv.Spec.PersistentVolumeSource.CSI.ReadOnly)
 			attachment := makeTestAttachment(tc.attachID, nodeName, "test-pv")
-			_, err := csiAttacher.k8s.StorageV1().VolumeAttachments().Create(attachment)
+			_, err := csiAttacher.k8s.StorageV1().VolumeAttachments().Create(context.TODO(), attachment, metav1.CreateOptions{})
 			if err != nil {
 				t.Fatalf("failed to attach: %v", err)
 			}
@@ -984,7 +981,7 @@ func TestAttacherDetach(t *testing.T) {
 			if !tc.shouldFail && err != nil {
 				t.Fatalf("unexpected err: %v", err)
 			}
-			attach, err := csiAttacher.k8s.StorageV1().VolumeAttachments().Get(tc.attachID, meta.GetOptions{})
+			attach, err := csiAttacher.k8s.StorageV1().VolumeAttachments().Get(context.TODO(), tc.attachID, meta.GetOptions{})
 			if err != nil {
 				if !apierrors.IsNotFound(err) {
 					t.Fatalf("unexpected err: %v", err)
@@ -1185,7 +1182,7 @@ func TestAttacherMountDevice(t *testing.T) {
 			if tc.createAttachment {
 				// Set up volume attachment
 				attachment := makeTestAttachment(attachID, nodeName, pvName)
-				_, err := csiAttacher.k8s.StorageV1().VolumeAttachments().Create(attachment)
+				_, err := csiAttacher.k8s.StorageV1().VolumeAttachments().Create(context.TODO(), attachment, metav1.CreateOptions{})
 				if err != nil {
 					t.Fatalf("failed to attach: %v", err)
 				}
@@ -1335,7 +1332,7 @@ func TestAttacherMountDeviceWithInline(t *testing.T) {
 
 			// Set up volume attachment
 			attachment := makeTestAttachment(attachID, nodeName, pvName)
-			_, err := csiAttacher.k8s.StorageV1().VolumeAttachments().Create(attachment)
+			_, err := csiAttacher.k8s.StorageV1().VolumeAttachments().Create(context.TODO(), attachment, metav1.CreateOptions{})
 			if err != nil {
 				t.Fatalf("failed to attach: %v", err)
 			}
@@ -1479,7 +1476,7 @@ func TestAttacherUnmountDevice(t *testing.T) {
 				// Make the PV for this object
 				pvName := filepath.Base(dir)
 				pv := makeTestPV(pvName, 5, "csi", tc.volID)
-				_, err := csiAttacher.k8s.CoreV1().PersistentVolumes().Create(pv)
+				_, err := csiAttacher.k8s.CoreV1().PersistentVolumes().Create(context.TODO(), pv, metav1.CreateOptions{})
 				if err != nil && !tc.shouldFail {
 					t.Fatalf("Failed to create PV: %v", err)
 				}
@@ -1552,7 +1549,7 @@ func newTestWatchPlugin(t *testing.T, fakeClient *fakeclient.Clientset) (*csiPlu
 
 	// Start informer for CSIDrivers.
 	factory := informers.NewSharedInformerFactory(fakeClient, CsiResyncPeriod)
-	csiDriverInformer := factory.Storage().V1beta1().CSIDrivers()
+	csiDriverInformer := factory.Storage().V1().CSIDrivers()
 	csiDriverLister := csiDriverInformer.Lister()
 	factory.Start(wait.NeverStop)
 
@@ -1575,12 +1572,10 @@ func newTestWatchPlugin(t *testing.T, fakeClient *fakeclient.Clientset) (*csiPlu
 		t.Fatalf("cannot assert plugin to be type csiPlugin")
 	}
 
-	if utilfeature.DefaultFeatureGate.Enabled(features.CSIDriverRegistry) {
-		// Wait until the informer in CSI volume plugin has all CSIDrivers.
-		wait.PollImmediate(TestInformerSyncPeriod, TestInformerSyncTimeout, func() (bool, error) {
-			return csiDriverInformer.Informer().HasSynced(), nil
-		})
-	}
+	// Wait until the informer in CSI volume plugin has all CSIDrivers.
+	wait.PollImmediate(TestInformerSyncPeriod, TestInformerSyncTimeout, func() (bool, error) {
+		return csiDriverInformer.Informer().HasSynced(), nil
+	})
 
 	return csiPlug, fakeWatcher, tmpDir, fakeClient
 }

@@ -169,8 +169,8 @@ func (pl *TestPlugin) Filter(ctx context.Context, state *CycleState, pod *v1.Pod
 	return NewStatus(Code(pl.inj.FilterStatus), "injected filter status")
 }
 
-func (pl *TestPlugin) PostFilter(ctx context.Context, state *CycleState, pod *v1.Pod, nodes []*v1.Node, filteredNodesStatuses NodeToStatusMap) *Status {
-	return NewStatus(Code(pl.inj.PostFilterStatus), "injected status")
+func (pl *TestPlugin) PreScore(ctx context.Context, state *CycleState, pod *v1.Pod, nodes []*v1.Node) *Status {
+	return NewStatus(Code(pl.inj.PreScoreStatus), "injected status")
 }
 
 func (pl *TestPlugin) Reserve(ctx context.Context, state *CycleState, p *v1.Pod, nodeName string) *Status {
@@ -410,25 +410,52 @@ func TestInitFrameworkWithScorePlugins(t *testing.T) {
 	}
 }
 
-func TestRegisterDuplicatePluginWouldFail(t *testing.T) {
-	plugin := config.Plugin{Name: duplicatePluginName, Weight: 1}
-
-	pluginSet := config.PluginSet{
-		Enabled: []config.Plugin{
-			plugin,
-			plugin,
+func TestNewFrameworkErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		plugins   *config.Plugins
+		pluginCfg []config.PluginConfig
+		wantErr   string
+	}{
+		{
+			name: "duplicate plugin name",
+			plugins: &config.Plugins{
+				PreFilter: &config.PluginSet{
+					Enabled: []config.Plugin{
+						{Name: duplicatePluginName, Weight: 1},
+						{Name: duplicatePluginName, Weight: 1},
+					},
+				},
+			},
+			pluginCfg: []config.PluginConfig{
+				{Name: duplicatePluginName},
+			},
+			wantErr: "already registered",
+		},
+		{
+			name: "duplicate plugin config",
+			plugins: &config.Plugins{
+				PreFilter: &config.PluginSet{
+					Enabled: []config.Plugin{
+						{Name: duplicatePluginName, Weight: 1},
+					},
+				},
+			},
+			pluginCfg: []config.PluginConfig{
+				{Name: duplicatePluginName},
+				{Name: duplicatePluginName},
+			},
+			wantErr: "repeated config for plugin",
 		},
 	}
-	plugins := config.Plugins{}
-	plugins.PreFilter = &pluginSet
 
-	_, err := NewFramework(registry, &plugins, emptyArgs)
-	if err == nil {
-		t.Fatal("Framework initialization should fail")
-	}
-
-	if err != nil && !strings.Contains(err.Error(), "already registered") {
-		t.Fatalf("Unexpected error, got %s, expect: plugin already registered", err.Error())
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NewFramework(registry, tc.plugins, tc.pluginCfg)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("Unexpected error, got %v, expect: %s", err, tc.wantErr)
+			}
+		})
 	}
 }
 
@@ -1217,7 +1244,7 @@ func TestPermitPlugins(t *testing.T) {
 					inj:  injectedResult{PermitStatus: int(Unschedulable)},
 				},
 			},
-			want: NewStatus(Unschedulable, `rejected by "TestPlugin" at permit: injected status`),
+			want: NewStatus(Unschedulable, `rejected pod "" by permit plugin "TestPlugin": injected status`),
 		},
 		{
 			name: "ErrorPermitPlugin",
@@ -1237,7 +1264,7 @@ func TestPermitPlugins(t *testing.T) {
 					inj:  injectedResult{PermitStatus: int(UnschedulableAndUnresolvable)},
 				},
 			},
-			want: NewStatus(UnschedulableAndUnresolvable, `rejected by "TestPlugin" at permit: injected status`),
+			want: NewStatus(UnschedulableAndUnresolvable, `rejected pod "" by permit plugin "TestPlugin": injected status`),
 		},
 		{
 			name: "WaitPermitPlugin",
@@ -1247,7 +1274,7 @@ func TestPermitPlugins(t *testing.T) {
 					inj:  injectedResult{PermitStatus: int(Wait)},
 				},
 			},
-			want: NewStatus(Unschedulable, `pod "" rejected while waiting at permit: rejected due to timeout after waiting 0s at plugin TestPlugin`),
+			want: NewStatus(Wait, `one or more plugins asked to wait and no plugin rejected pod ""`),
 		},
 		{
 			name: "SuccessSuccessPermitPlugin",
@@ -1328,9 +1355,9 @@ func TestRecordingMetrics(t *testing.T) {
 			wantStatus:         Success,
 		},
 		{
-			name:               "PostFilter - Success",
-			action:             func(f Framework) { f.RunPostFilterPlugins(context.Background(), state, pod, nil, nil) },
-			wantExtensionPoint: "PostFilter",
+			name:               "PreScore - Success",
+			action:             func(f Framework) { f.RunPreScorePlugins(context.Background(), state, pod, nil) },
+			wantExtensionPoint: "PreScore",
 			wantStatus:         Success,
 		},
 		{
@@ -1384,10 +1411,10 @@ func TestRecordingMetrics(t *testing.T) {
 			wantStatus:         Error,
 		},
 		{
-			name:               "PostFilter - Error",
-			action:             func(f Framework) { f.RunPostFilterPlugins(context.Background(), state, pod, nil, nil) },
-			inject:             injectedResult{PostFilterStatus: int(Error)},
-			wantExtensionPoint: "PostFilter",
+			name:               "PreScore - Error",
+			action:             func(f Framework) { f.RunPreScorePlugins(context.Background(), state, pod, nil) },
+			inject:             injectedResult{PreScoreStatus: int(Error)},
+			wantExtensionPoint: "PreScore",
 			wantStatus:         Error,
 		},
 		{
@@ -1425,6 +1452,13 @@ func TestRecordingMetrics(t *testing.T) {
 			wantExtensionPoint: "Permit",
 			wantStatus:         Error,
 		},
+		{
+			name:               "Permit - Wait",
+			action:             func(f Framework) { f.RunPermitPlugins(context.Background(), state, pod, "") },
+			inject:             injectedResult{PermitStatus: int(Wait)},
+			wantExtensionPoint: "Permit",
+			wantStatus:         Wait,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1441,16 +1475,16 @@ func TestRecordingMetrics(t *testing.T) {
 				})
 			pluginSet := &config.PluginSet{Enabled: []config.Plugin{{Name: testPlugin, Weight: 1}}}
 			plugins := &config.Plugins{
-				Score:      pluginSet,
-				PreFilter:  pluginSet,
-				Filter:     pluginSet,
-				PostFilter: pluginSet,
-				Reserve:    pluginSet,
-				Permit:     pluginSet,
-				PreBind:    pluginSet,
-				Bind:       pluginSet,
-				PostBind:   pluginSet,
-				Unreserve:  pluginSet,
+				Score:     pluginSet,
+				PreFilter: pluginSet,
+				Filter:    pluginSet,
+				PreScore:  pluginSet,
+				Reserve:   pluginSet,
+				Permit:    pluginSet,
+				PreBind:   pluginSet,
+				Bind:      pluginSet,
+				PostBind:  pluginSet,
+				Unreserve: pluginSet,
 			}
 			recorder := newMetricsRecorder(100, time.Nanosecond)
 			f, err := newFrameworkWithQueueSortAndBind(r, plugins, emptyArgs, withMetricsRecorder(recorder))
@@ -1578,17 +1612,17 @@ func TestRunBindPlugins(t *testing.T) {
 	}
 }
 
-func TestPermitWaitingMetric(t *testing.T) {
+func TestPermitWaitDurationMetric(t *testing.T) {
 	tests := []struct {
 		name    string
 		inject  injectedResult
 		wantRes string
 	}{
 		{
-			name: "Permit - Success",
+			name: "WaitOnPermit - No Wait",
 		},
 		{
-			name:    "Permit - Wait Timeout",
+			name:    "WaitOnPermit - Wait Timeout",
 			inject:  injectedResult{PermitStatus: int(Wait)},
 			wantRes: "Unschedulable",
 		},
@@ -1617,13 +1651,14 @@ func TestPermitWaitingMetric(t *testing.T) {
 			}
 
 			f.RunPermitPlugins(context.TODO(), nil, pod, "")
+			f.WaitOnPermit(context.TODO(), pod)
 
 			collectAndComparePermitWaitDuration(t, tt.wantRes)
 		})
 	}
 }
 
-func TestRejectWaitingPod(t *testing.T) {
+func TestWaitOnPermit(t *testing.T) {
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "pod",
@@ -1631,33 +1666,100 @@ func TestRejectWaitingPod(t *testing.T) {
 		},
 	}
 
-	testPermitPlugin := &TestPermitPlugin{}
-	r := make(Registry)
-	r.Register(permitPlugin,
-		func(_ *runtime.Unknown, fh FrameworkHandle) (Plugin, error) {
-			return testPermitPlugin, nil
-		})
-	plugins := &config.Plugins{
-		Permit: &config.PluginSet{Enabled: []config.Plugin{{Name: permitPlugin, Weight: 1}}},
+	tests := []struct {
+		name        string
+		action      func(f Framework)
+		wantStatus  Code
+		wantMessage string
+	}{
+		{
+			name: "Reject Waiting Pod",
+			action: func(f Framework) {
+				f.GetWaitingPod(pod.UID).Reject("reject message")
+			},
+			wantStatus:  Unschedulable,
+			wantMessage: "pod \"pod\" rejected while waiting on permit: reject message",
+		},
+		{
+			name: "Allow Waiting Pod",
+			action: func(f Framework) {
+				f.GetWaitingPod(pod.UID).Allow(permitPlugin)
+			},
+			wantStatus:  Success,
+			wantMessage: "",
+		},
 	}
 
-	f, err := newFrameworkWithQueueSortAndBind(r, plugins, emptyArgs)
-	if err != nil {
-		t.Fatalf("Failed to create framework for testing: %v", err)
-	}
-
-	go func() {
-		for {
-			waitingPod := f.GetWaitingPod(pod.UID)
-			if waitingPod != nil {
-				break
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testPermitPlugin := &TestPermitPlugin{}
+			r := make(Registry)
+			r.Register(permitPlugin,
+				func(_ *runtime.Unknown, fh FrameworkHandle) (Plugin, error) {
+					return testPermitPlugin, nil
+				})
+			plugins := &config.Plugins{
+				Permit: &config.PluginSet{Enabled: []config.Plugin{{Name: permitPlugin, Weight: 1}}},
 			}
-		}
-		f.RejectWaitingPod(pod.UID)
-	}()
-	permitStatus := f.RunPermitPlugins(context.Background(), nil, pod, "")
-	if permitStatus.Message() != "pod \"pod\" rejected while waiting at permit: removed" {
-		t.Fatalf("RejectWaitingPod failed, permitStatus: %v", permitStatus)
+
+			f, err := newFrameworkWithQueueSortAndBind(r, plugins, emptyArgs)
+			if err != nil {
+				t.Fatalf("Failed to create framework for testing: %v", err)
+			}
+
+			runPermitPluginsStatus := f.RunPermitPlugins(context.Background(), nil, pod, "")
+			if runPermitPluginsStatus.Code() != Wait {
+				t.Fatalf("Expected RunPermitPlugins to return status %v, but got %v",
+					Wait, runPermitPluginsStatus.Code())
+			}
+
+			go tt.action(f)
+
+			waitOnPermitStatus := f.WaitOnPermit(context.Background(), pod)
+			if waitOnPermitStatus.Code() != tt.wantStatus {
+				t.Fatalf("Expected WaitOnPermit to return status %v, but got %v",
+					tt.wantStatus, waitOnPermitStatus.Code())
+			}
+			if waitOnPermitStatus.Message() != tt.wantMessage {
+				t.Fatalf("Expected WaitOnPermit to return status with message %q, but got %q",
+					tt.wantMessage, waitOnPermitStatus.Message())
+			}
+		})
+	}
+}
+
+func TestListPlugins(t *testing.T) {
+	tests := []struct {
+		name    string
+		plugins *config.Plugins
+		// pluginSetCount include queue sort plugin and bind plugin.
+		pluginSetCount int
+	}{
+		{
+			name:           "Add empty plugin",
+			plugins:        &config.Plugins{},
+			pluginSetCount: 2,
+		},
+		{
+			name: "Add multiple plugins",
+			plugins: &config.Plugins{
+				Score: &config.PluginSet{Enabled: []config.Plugin{{Name: scorePlugin1}, {Name: scoreWithNormalizePlugin1}}},
+			},
+			pluginSetCount: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, err := newFrameworkWithQueueSortAndBind(registry, tt.plugins, emptyArgs)
+			if err != nil {
+				t.Fatalf("Failed to create framework for testing: %v", err)
+			}
+			plugins := f.ListPlugins()
+			if len(plugins) != tt.pluginSetCount {
+				t.Fatalf("Unexpected pluginSet count: %v", len(plugins))
+			}
+		})
 	}
 }
 
@@ -1682,7 +1784,7 @@ type injectedResult struct {
 	PreFilterAddPodStatus    int   `json:"preFilterAddPodStatus,omitempty"`
 	PreFilterRemovePodStatus int   `json:"preFilterRemovePodStatus,omitempty"`
 	FilterStatus             int   `json:"filterStatus,omitempty"`
-	PostFilterStatus         int   `json:"postFilterStatus,omitempty"`
+	PreScoreStatus           int   `json:"preScoreStatus,omitempty"`
 	ReserveStatus            int   `json:"reserveStatus,omitempty"`
 	PreBindStatus            int   `json:"preBindStatus,omitempty"`
 	BindStatus               int   `json:"bindStatus,omitempty"`

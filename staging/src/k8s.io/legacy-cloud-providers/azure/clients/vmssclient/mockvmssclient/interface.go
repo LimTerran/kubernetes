@@ -22,7 +22,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	compute "github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-07-01/compute"
+	compute "github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-12-01/compute"
 	gomock "github.com/golang/mock/gomock"
 	retry "k8s.io/legacy-cloud-providers/azure/retry"
 )
@@ -92,4 +92,18 @@ func (m *MockInterface) CreateOrUpdate(ctx context.Context, resourceGroupName, V
 func (mr *MockInterfaceMockRecorder) CreateOrUpdate(ctx, resourceGroupName, VMScaleSetName, parameters interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateOrUpdate", reflect.TypeOf((*MockInterface)(nil).CreateOrUpdate), ctx, resourceGroupName, VMScaleSetName, parameters)
+}
+
+// DeleteInstances mocks base method
+func (m *MockInterface) DeleteInstances(ctx context.Context, resourceGroupName, vmScaleSetName string, vmInstanceIDs compute.VirtualMachineScaleSetVMInstanceRequiredIDs) *retry.Error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteInstances", ctx, resourceGroupName, vmScaleSetName, vmInstanceIDs)
+	ret0, _ := ret[0].(*retry.Error)
+	return ret0
+}
+
+// DeleteInstances indicates an expected call of DeleteInstances
+func (mr *MockInterfaceMockRecorder) DeleteInstances(ctx, resourceGroupName, vmScaleSetName, vmInstanceIDs interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteInstances", reflect.TypeOf((*MockInterface)(nil).DeleteInstances), ctx, resourceGroupName, vmScaleSetName, vmInstanceIDs)
 }
