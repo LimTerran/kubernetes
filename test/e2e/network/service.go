@@ -84,6 +84,9 @@ const (
 	// AffinityConfirmCount is the number of needed continuous requests to confirm that
 	// affinity is enabled.
 	AffinityConfirmCount = 15
+
+	// ssh port
+	sshPort = "22"
 )
 
 var (
@@ -902,11 +905,11 @@ var _ = SIGDescribe("Services", func() {
 
 		ginkgo.By("Creating a webserver pod to be part of the TCP service which echoes back source ip")
 		serverPodName := "echo-sourceip"
-		pod := f.NewAgnhostPod(serverPodName, "netexec", "--http-port", strconv.Itoa(servicePort))
+		pod := newAgnhostPod(serverPodName, "netexec", "--http-port", strconv.Itoa(servicePort))
 		pod.Labels = jig.Labels
 		_, err = cs.CoreV1().Pods(ns).Create(context.TODO(), pod, metav1.CreateOptions{})
 		framework.ExpectNoError(err)
-		framework.ExpectNoError(f.WaitForPodReady(pod.Name))
+		framework.ExpectNoError(e2epod.WaitTimeoutForPodReadyInNamespace(f.ClientSet, pod.Name, f.Namespace.Name, framework.PodStartTimeout))
 		defer func() {
 			framework.Logf("Cleaning up the echo server pod")
 			err := cs.CoreV1().Pods(ns).Delete(context.TODO(), serverPodName, metav1.DeleteOptions{})
@@ -960,11 +963,11 @@ var _ = SIGDescribe("Services", func() {
 
 		ginkgo.By("creating a client/server pod")
 		serverPodName := "hairpin"
-		podTemplate := f.NewAgnhostPod(serverPodName, "netexec", "--http-port", strconv.Itoa(servicePort))
+		podTemplate := newAgnhostPod(serverPodName, "netexec", "--http-port", strconv.Itoa(servicePort))
 		podTemplate.Labels = jig.Labels
 		pod, err := cs.CoreV1().Pods(ns).Create(context.TODO(), podTemplate, metav1.CreateOptions{})
 		framework.ExpectNoError(err)
-		framework.ExpectNoError(f.WaitForPodReady(pod.Name))
+		framework.ExpectNoError(e2epod.WaitTimeoutForPodReadyInNamespace(f.ClientSet, pod.Name, f.Namespace.Name, framework.PodStartTimeout))
 
 		ginkgo.By("waiting for the service to expose an endpoint")
 		err = validateEndpointsPorts(cs, ns, serviceName, portsByPodName{serverPodName: {servicePort}})
@@ -1107,7 +1110,7 @@ var _ = SIGDescribe("Services", func() {
 
 		// Restart apiserver
 		ginkgo.By("Restarting apiserver")
-		if err := framework.RestartApiserver(ns, cs); err != nil {
+		if err := restartApiserver(ns, cs); err != nil {
 			framework.Failf("error restarting apiserver: %v", err)
 		}
 		ginkgo.By("Waiting for apiserver to come up by polling /healthz")
@@ -3334,7 +3337,7 @@ func proxyMode(f *framework.Framework) (string, error) {
 			Containers: []v1.Container{
 				{
 					Name:  "detector",
-					Image: framework.AgnHostImage,
+					Image: agnHostImage,
 					Args:  []string{"pause"},
 				},
 			},
@@ -3430,4 +3433,84 @@ func validateEndpointsPorts(c clientset.Interface, namespace, serviceName string
 		framework.Logf("Can't list pod debug info: %v", err)
 	}
 	return fmt.Errorf("Timed out waiting for service %s in namespace %s to expose endpoints %v (%v elapsed)", serviceName, namespace, expectedEndpoints, framework.ServiceStartTimeout)
+}
+
+// restartApiserver restarts the kube-apiserver.
+func restartApiserver(namespace string, cs clientset.Interface) error {
+	// TODO: Make it work for all providers.
+	if !framework.ProviderIs("gce", "gke", "aws") {
+		return fmt.Errorf("unsupported provider for RestartApiserver: %s", framework.TestContext.Provider)
+	}
+	if framework.ProviderIs("gce", "aws") {
+		initialRestartCount, err := getApiserverRestartCount(cs)
+		if err != nil {
+			return fmt.Errorf("failed to get apiserver's restart count: %v", err)
+		}
+		if err := sshRestartMaster(); err != nil {
+			return fmt.Errorf("failed to restart apiserver: %v", err)
+		}
+		return waitForApiserverRestarted(cs, initialRestartCount)
+	}
+	// GKE doesn't allow ssh access, so use a same-version master
+	// upgrade to teardown/recreate master.
+	v, err := cs.Discovery().ServerVersion()
+	if err != nil {
+		return err
+	}
+	return framework.MasterUpgradeGKE(namespace, v.GitVersion[1:]) // strip leading 'v'
+}
+
+func sshRestartMaster() error {
+	if !framework.ProviderIs("gce", "aws") {
+		return fmt.Errorf("unsupported provider for sshRestartMaster: %s", framework.TestContext.Provider)
+	}
+	var command string
+	if framework.ProviderIs("gce") {
+		command = "pidof kube-apiserver | xargs sudo kill"
+	} else {
+		command = "sudo /etc/init.d/kube-apiserver restart"
+	}
+	framework.Logf("Restarting master via ssh, running: %v", command)
+	result, err := e2essh.SSH(command, net.JoinHostPort(framework.GetMasterHost(), sshPort), framework.TestContext.Provider)
+	if err != nil || result.Code != 0 {
+		e2essh.LogResult(result)
+		return fmt.Errorf("couldn't restart apiserver: %v", err)
+	}
+	return nil
+}
+
+// waitForApiserverRestarted waits until apiserver's restart count increased.
+func waitForApiserverRestarted(c clientset.Interface, initialRestartCount int32) error {
+	for start := time.Now(); time.Since(start) < time.Minute; time.Sleep(5 * time.Second) {
+		restartCount, err := getApiserverRestartCount(c)
+		if err != nil {
+			framework.Logf("Failed to get apiserver's restart count: %v", err)
+			continue
+		}
+		if restartCount > initialRestartCount {
+			framework.Logf("Apiserver has restarted.")
+			return nil
+		}
+		framework.Logf("Waiting for apiserver restart count to increase")
+	}
+	return fmt.Errorf("timed out waiting for apiserver to be restarted")
+}
+
+func getApiserverRestartCount(c clientset.Interface) (int32, error) {
+	label := labels.SelectorFromSet(labels.Set(map[string]string{"component": "kube-apiserver"}))
+	listOpts := metav1.ListOptions{LabelSelector: label.String()}
+	pods, err := c.CoreV1().Pods(metav1.NamespaceSystem).List(context.TODO(), listOpts)
+	if err != nil {
+		return -1, err
+	}
+	if len(pods.Items) != 1 {
+		return -1, fmt.Errorf("unexpected number of apiserver pod: %d", len(pods.Items))
+	}
+	for _, s := range pods.Items[0].Status.ContainerStatuses {
+		if s.Name != "kube-apiserver" {
+			continue
+		}
+		return s.RestartCount, nil
+	}
+	return -1, fmt.Errorf("Failed to find kube-apiserver container in pod")
 }
