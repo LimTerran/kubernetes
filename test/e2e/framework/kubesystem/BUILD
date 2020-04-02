@@ -1,16 +1,14 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
 
 go_library(
     name = "go_default_library",
-    srcs = ["container_map.go"],
-    importpath = "k8s.io/kubernetes/pkg/kubelet/cm/cpumanager/containermap",
+    srcs = ["kubesystem.go"],
+    importpath = "k8s.io/kubernetes/test/e2e/framework/kubesystem",
     visibility = ["//visibility:public"],
-)
-
-go_test(
-    name = "go_default_test",
-    srcs = ["container_map_test.go"],
-    embed = [":go_default_library"],
+    deps = [
+        "//test/e2e/framework:go_default_library",
+        "//test/e2e/framework/ssh:go_default_library",
+    ],
 )
 
 filegroup(

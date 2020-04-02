@@ -63,7 +63,6 @@ import (
 	watchtools "k8s.io/client-go/tools/watch"
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 	"k8s.io/kubernetes/pkg/controller"
-	taintutils "k8s.io/kubernetes/pkg/util/taints"
 	testutils "k8s.io/kubernetes/test/utils"
 	imageutils "k8s.io/kubernetes/test/utils/image"
 	uexec "k8s.io/utils/exec"
@@ -73,7 +72,6 @@ import (
 	e2emetrics "k8s.io/kubernetes/test/e2e/framework/metrics"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
-	e2essh "k8s.io/kubernetes/test/e2e/framework/ssh"
 )
 
 const (
@@ -144,9 +142,6 @@ const (
 
 	// TODO(justinsb): Avoid hardcoding this.
 	awsMasterIP = "172.20.0.9"
-
-	// ssh port
-	sshPort = "22"
 )
 
 var (
@@ -769,7 +764,7 @@ func (f *Framework) MatchContainerOutput(
 
 	if podErr != nil {
 		// Pod failed. Dump all logs from all containers to see what's wrong
-		_ = podutil.VisitContainers(&podStatus.Spec, func(c *v1.Container) bool {
+		_ = podutil.VisitContainers(&podStatus.Spec, podutil.AllFeatureEnabledContainers(), func(c *v1.Container, containerType podutil.ContainerType) bool {
 			logs, err := e2epod.GetPodLogs(f.ClientSet, ns, podStatus.Name, c.Name)
 			if err != nil {
 				Logf("Failed to get logs from node %q pod %q container %q: %v",
@@ -1008,7 +1003,7 @@ func verifyThatTaintIsGone(c clientset.Interface, nodeName string, taint *v1.Tai
 	ginkgo.By("verifying the node doesn't have the taint " + taint.ToString())
 	nodeUpdated, err := c.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	ExpectNoError(err)
-	if taintutils.TaintExists(nodeUpdated.Spec.Taints, taint) {
+	if taintExists(nodeUpdated.Spec.Taints, taint) {
 		Failf("Failed removing taint " + taint.ToString() + " of the node " + nodeName)
 	}
 }
@@ -1031,7 +1026,7 @@ func NodeHasTaint(c clientset.Interface, nodeName string, taint *v1.Taint) (bool
 
 	nodeTaints := node.Spec.Taints
 
-	if len(nodeTaints) == 0 || !taintutils.TaintExists(nodeTaints, taint) {
+	if len(nodeTaints) == 0 || !taintExists(nodeTaints, taint) {
 		return false, nil
 	}
 	return true, nil
@@ -1113,40 +1108,6 @@ func AllNodesReady(c clientset.Interface, timeout time.Duration) error {
 		return fmt.Errorf("Not ready nodes: %#v", msg)
 	}
 	return nil
-}
-
-// RestartControllerManager restarts the kube-controller-manager.
-func RestartControllerManager() error {
-	// TODO: Make it work for all providers and distros.
-	if !ProviderIs("gce", "aws") {
-		return fmt.Errorf("unsupported provider for RestartControllerManager: %s", TestContext.Provider)
-	}
-	if ProviderIs("gce") && !MasterOSDistroIs("gci") {
-		return fmt.Errorf("unsupported master OS distro: %s", TestContext.MasterOSDistro)
-	}
-	cmd := "pidof kube-controller-manager | xargs sudo kill"
-	Logf("Restarting controller-manager via ssh, running: %v", cmd)
-	result, err := e2essh.SSH(cmd, net.JoinHostPort(GetMasterHost(), sshPort), TestContext.Provider)
-	if err != nil || result.Code != 0 {
-		e2essh.LogResult(result)
-		return fmt.Errorf("couldn't restart controller-manager: %v", err)
-	}
-	return nil
-}
-
-// WaitForControllerManagerUp waits for the kube-controller-manager to be up.
-func WaitForControllerManagerUp() error {
-	cmd := "curl http://localhost:" + strconv.Itoa(InsecureKubeControllerManagerPort) + "/healthz"
-	for start := time.Now(); time.Since(start) < time.Minute; time.Sleep(5 * time.Second) {
-		result, err := e2essh.SSH(cmd, net.JoinHostPort(GetMasterHost(), sshPort), TestContext.Provider)
-		if err != nil || result.Code != 0 {
-			e2essh.LogResult(result)
-		}
-		if result.Stdout == "ok" {
-			return nil
-		}
-	}
-	return fmt.Errorf("waiting for controller-manager timed out")
 }
 
 // LookForStringInLog looks for the given string in the log of a specific pod container
@@ -1360,4 +1321,14 @@ func PrettyPrintJSON(metrics interface{}) string {
 		return ""
 	}
 	return string(formatted.Bytes())
+}
+
+// taintExists checks if the given taint exists in list of taints. Returns true if exists false otherwise.
+func taintExists(taints []v1.Taint, taintToFind *v1.Taint) bool {
+	for _, taint := range taints {
+		if taint.MatchTaint(taintToFind) {
+			return true
+		}
+	}
+	return false
 }

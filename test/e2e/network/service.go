@@ -19,6 +19,7 @@ package network
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -37,14 +38,16 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/kubernetes/test/e2e/framework"
-	e2edeploy "k8s.io/kubernetes/test/e2e/framework/deployment"
+	e2edeployment "k8s.io/kubernetes/test/e2e/framework/deployment"
 	e2eendpoints "k8s.io/kubernetes/test/e2e/framework/endpoints"
+	e2ekubesystem "k8s.io/kubernetes/test/e2e/framework/kubesystem"
 	e2enetwork "k8s.io/kubernetes/test/e2e/framework/network"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
@@ -929,7 +932,7 @@ var _ = SIGDescribe("Services", func() {
 			framework.ExpectNoError(err, "Failed to delete deployment %s", deployment.Name)
 		}()
 
-		framework.ExpectNoError(e2edeploy.WaitForDeploymentComplete(cs, deployment), "Failed to complete pause pod deployment")
+		framework.ExpectNoError(e2edeployment.WaitForDeploymentComplete(cs, deployment), "Failed to complete pause pod deployment")
 
 		deployment, err = cs.AppsV1().Deployments(ns).Get(context.TODO(), deployment.Name, metav1.GetOptions{})
 		framework.ExpectNoError(err, "Error in retrieving pause pod deployment")
@@ -938,7 +941,7 @@ var _ = SIGDescribe("Services", func() {
 		pausePods, err := cs.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{LabelSelector: labelSelector.String()})
 		framework.ExpectNoError(err, "Error in listing pods associated with pause pod deployments")
 
-		gomega.Expect(pausePods.Items[0].Spec.NodeName).ToNot(gomega.Equal(pausePods.Items[1].Spec.NodeName))
+		framework.ExpectNotEqual(pausePods.Items[0].Spec.NodeName, pausePods.Items[1].Spec.NodeName)
 
 		serviceAddress := net.JoinHostPort(serviceIP, strconv.Itoa(servicePort))
 
@@ -2343,11 +2346,11 @@ var _ = SIGDescribe("Services", func() {
 		}
 
 		ginkgo.By("restart kube-controller-manager")
-		if err := framework.RestartControllerManager(); err != nil {
-			framework.Failf("framework.RestartControllerManager() = %v; want nil", err)
+		if err := e2ekubesystem.RestartControllerManager(); err != nil {
+			framework.Failf("e2ekubesystem.RestartControllerManager() = %v; want nil", err)
 		}
-		if err := framework.WaitForControllerManagerUp(); err != nil {
-			framework.Failf("framework.WaitForControllerManagerUp() = %v; want nil", err)
+		if err := e2ekubesystem.WaitForControllerManagerUp(); err != nil {
+			framework.Failf("e2ekubesystem.WaitForControllerManagerUp() = %v; want nil", err)
 		}
 
 		ginkgo.By("health check should be reconciled")
@@ -2682,6 +2685,119 @@ var _ = SIGDescribe("Services", func() {
 
 		framework.ExpectEqual(foundSvc, true, "could not find service 'kubernetes' in service list in all namespaces")
 	})
+
+	ginkgo.It("should test the lifecycle of an Endpoint", func() {
+		ns := f.Namespace.Name
+		testEndpointName := "testservice"
+
+		ginkgo.By("creating an Endpoint")
+		_, err := f.ClientSet.CoreV1().Endpoints(ns).Create(context.TODO(), &v1.Endpoints{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      testEndpointName,
+				Namespace: ns,
+				Labels: map[string]string{
+					"testendpoint-static": "true",
+				},
+			},
+			Subsets: []v1.EndpointSubset{{
+				Addresses: []v1.EndpointAddress{{
+					IP: "10.0.0.24",
+				}},
+				Ports: []v1.EndpointPort{{
+					Name:     "http",
+					Port:     80,
+					Protocol: v1.ProtocolTCP,
+				}},
+			}},
+		}, metav1.CreateOptions{})
+		framework.ExpectNoError(err, "failed to create Endpoint")
+
+		// set up a watch for the Endpoint
+		// this timeout was chosen as there was timeout failure from the CI
+		endpointWatchTimeoutSeconds := int64(180)
+		endpointWatch, err := f.ClientSet.CoreV1().Endpoints(ns).Watch(context.TODO(), metav1.ListOptions{LabelSelector: "testendpoint-static=true", TimeoutSeconds: &endpointWatchTimeoutSeconds})
+		framework.ExpectNoError(err, "failed to setup watch on newly created Endpoint")
+		endpointWatchChan := endpointWatch.ResultChan()
+		ginkgo.By("waiting for available Endpoint")
+		for watchEvent := range endpointWatchChan {
+			if watchEvent.Type == "ADDED" {
+				break
+			}
+		}
+
+		ginkgo.By("listing all Endpoints")
+		endpointsList, err := f.ClientSet.CoreV1().Endpoints("").List(context.TODO(), metav1.ListOptions{LabelSelector: "testendpoint-static=true"})
+		framework.ExpectNoError(err, "failed to list Endpoints")
+		foundEndpointService := false
+		var foundEndpoint v1.Endpoints
+		for _, endpoint := range endpointsList.Items {
+			if endpoint.ObjectMeta.Name == testEndpointName && endpoint.ObjectMeta.Namespace == ns {
+				foundEndpointService = true
+				foundEndpoint = endpoint
+				break
+			}
+		}
+		framework.ExpectEqual(foundEndpointService, true, "unable to find Endpoint Service in list of Endpoints")
+
+		ginkgo.By("updating the Endpoint")
+		foundEndpoint.ObjectMeta.Labels["testservice"] = "first-modification"
+		_, err = f.ClientSet.CoreV1().Endpoints(ns).Update(context.TODO(), &foundEndpoint, metav1.UpdateOptions{})
+		framework.ExpectNoError(err, "failed to update Endpoint with new label")
+
+		ginkgo.By("fetching the Endpoint")
+		_, err = f.ClientSet.CoreV1().Endpoints(ns).Get(context.TODO(), testEndpointName, metav1.GetOptions{})
+		framework.ExpectNoError(err, "failed to fetch Endpoint")
+		framework.ExpectEqual(foundEndpoint.ObjectMeta.Labels["testservice"], "first-modification", "label not patched")
+
+		endpointPatch, err := json.Marshal(map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"labels": map[string]string{
+					"testservice": "second-modification",
+				},
+			},
+			"subsets": []map[string]interface{}{
+				{
+					"addresses": []map[string]string{
+						{
+							"ip": "10.0.0.25",
+						},
+					},
+					"ports": []map[string]interface{}{
+						{
+							"name": "http-test",
+							"port": int32(8080),
+						},
+					},
+				},
+			},
+		})
+		framework.ExpectNoError(err, "failed to marshal JSON for WatchEvent patch")
+		ginkgo.By("patching the Endpoint")
+		_, err = f.ClientSet.CoreV1().Endpoints(ns).Patch(context.TODO(), testEndpointName, types.StrategicMergePatchType, []byte(endpointPatch), metav1.PatchOptions{})
+		framework.ExpectNoError(err, "failed to patch Endpoint")
+
+		ginkgo.By("fetching the Endpoint")
+		endpoint, err := f.ClientSet.CoreV1().Endpoints(ns).Get(context.TODO(), testEndpointName, metav1.GetOptions{})
+		framework.ExpectNoError(err, "failed to fetch Endpoint")
+		framework.ExpectEqual(endpoint.ObjectMeta.Labels["testservice"], "second-modification", "failed to patch Endpoint with Label")
+		endpointSubsetOne := endpoint.Subsets[0]
+		endpointSubsetOneAddresses := endpointSubsetOne.Addresses[0]
+		endpointSubsetOnePorts := endpointSubsetOne.Ports[0]
+		framework.ExpectEqual(endpointSubsetOneAddresses.IP, "10.0.0.25", "failed to patch Endpoint")
+		framework.ExpectEqual(endpointSubsetOnePorts.Name, "http-test", "failed to patch Endpoint")
+		framework.ExpectEqual(endpointSubsetOnePorts.Port, int32(8080), "failed to patch Endpoint")
+
+		ginkgo.By("deleting the Endpoint by Collection")
+		err = f.ClientSet.CoreV1().Endpoints(ns).DeleteCollection(context.TODO(), metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "testendpoint-static=true"})
+		framework.ExpectNoError(err, "failed to delete Endpoint by Collection")
+
+		ginkgo.By("waiting for Endpoint deletion")
+		for watchEvent := range endpointWatchChan {
+			if watchEvent.Type == "DELETED" {
+				break
+			}
+		}
+	})
 })
 
 // TODO: Get rid of [DisabledForLargeClusters] tag when issue #56138 is fixed.
@@ -2877,7 +2993,7 @@ var _ = SIGDescribe("ESIPP [Slow] [DisabledForLargeClusters]", func() {
 
 		ginkgo.By("Creating pause pod deployment to make sure, pausePods are in desired state")
 		deployment := createPausePodDeployment(cs, "pause-pod-deployment", namespace, 1)
-		framework.ExpectNoError(e2edeploy.WaitForDeploymentComplete(cs, deployment), "Failed to complete pause pod deployment")
+		framework.ExpectNoError(e2edeployment.WaitForDeploymentComplete(cs, deployment), "Failed to complete pause pod deployment")
 
 		defer func() {
 			framework.Logf("Deleting deployment")
@@ -3245,7 +3361,7 @@ func createAndGetExternalServiceFQDN(cs clientset.Interface, ns, serviceName str
 
 func createPausePodDeployment(cs clientset.Interface, name, ns string, replicas int) *appsv1.Deployment {
 	labels := map[string]string{"deployment": "agnhost-pause"}
-	pauseDeployment := e2edeploy.NewDeployment(name, int32(replicas), labels, "", "", appsv1.RollingUpdateDeploymentStrategyType)
+	pauseDeployment := e2edeployment.NewDeployment(name, int32(replicas), labels, "", "", appsv1.RollingUpdateDeploymentStrategyType)
 
 	pauseDeployment.Spec.Template.Spec.Containers[0] = v1.Container{
 		Name:  "agnhost-pause",
