@@ -223,6 +223,30 @@ __EOF__
   # cleanup
   kubectl delete svc prune-svc 2>&1 "${kube_flags[@]:?}"
 
+  ## kubectl apply --prune can prune resources not in the defaulted namespace
+  # Pre-Condition: namespace nsb exists; no POD exists
+  kubectl create ns nsb
+  kube::test::get_object_assert pods "{{range.items}}{{${id_field:?}}}:{{end}}" ''
+  # apply a into namespace nsb
+  kubectl apply --namespace nsb -f hack/testdata/prune/a.yaml "${kube_flags[@]:?}"
+  kube::test::get_object_assert 'pods a -n nsb' "{{${id_field:?}}}" 'a'
+  # apply b with namespace
+  kubectl apply --namespace nsb -f hack/testdata/prune/b.yaml "${kube_flags[@]:?}"
+  kube::test::get_object_assert 'pods b -n nsb' "{{${id_field:?}}}" 'b'
+  # apply --prune must prune a
+  kubectl apply --prune --all -f hack/testdata/prune/b.yaml
+  # check wrong pod doesn't exist
+  output_message=$(! kubectl get pods a -n nsb 2>&1 "${kube_flags[@]:?}")
+  kube::test::if_has_string "${output_message}" 'pods "a" not found'
+  # check right pod exists
+  kube::test::get_object_assert 'pods b -n nsb' "{{${id_field:?}}}" 'b'
+
+  # cleanup
+  kubectl delete ns nsb
+
+  ## kubectl apply -n must fail if input file contains namespace other than the one given in -n
+  output_message=$(! kubectl apply -n foo -f hack/testdata/prune/b.yaml 2>&1 "${kube_flags[@]:?}")
+  kube::test::if_has_string "${output_message}" 'the namespace from the provided object "nsb" does not match the namespace "foo".'
 
   ## kubectl apply -f some.yml --force
   # Pre-condition: no service exists
@@ -261,7 +285,7 @@ __EOF__
   # Pre-Condition: namepace does not exist and no POD exists
   output_message=$(! kubectl get namespace multi-resource-ns 2>&1 "${kube_flags[@]:?}")
   kube::test::if_has_string "${output_message}" 'namespaces "multi-resource-ns" not found'
-  kube::test::get_object_assert pods "{{range.items}}{{${id_field:?}}}:{{end}}" ''
+  kube::test::wait_object_assert pods "{{range.items}}{{${id_field:?}}}:{{end}}" ''
   # First pass, namespace is created, but pod is not (since namespace does not exist yet).
   output_message=$(! kubectl apply -f hack/testdata/multi-resource-1.yaml 2>&1 "${kube_flags[@]:?}")
   kube::test::if_has_string "${output_message}" 'namespaces "multi-resource-ns" not found'
