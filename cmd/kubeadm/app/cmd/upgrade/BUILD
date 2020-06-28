@@ -20,6 +20,7 @@ go_library(
         "//cmd/kubeadm/app/cmd/phases/upgrade/node:go_default_library",
         "//cmd/kubeadm/app/cmd/phases/workflow:go_default_library",
         "//cmd/kubeadm/app/cmd/util:go_default_library",
+        "//cmd/kubeadm/app/componentconfigs:go_default_library",
         "//cmd/kubeadm/app/constants:go_default_library",
         "//cmd/kubeadm/app/features:go_default_library",
         "//cmd/kubeadm/app/phases/controlplane:go_default_library",
@@ -41,7 +42,8 @@ go_library(
         "//vendor/github.com/pmezard/go-difflib/difflib:go_default_library",
         "//vendor/github.com/spf13/cobra:go_default_library",
         "//vendor/github.com/spf13/pflag:go_default_library",
-        "//vendor/k8s.io/klog:go_default_library",
+        "//vendor/k8s.io/klog/v2:go_default_library",
+        "//vendor/k8s.io/utils/exec:go_default_library",
     ],
 )
 

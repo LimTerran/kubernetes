@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-12-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2019-06-01/network"
@@ -36,8 +37,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/informers"
 	cloudprovider "k8s.io/cloud-provider"
 	servicehelpers "k8s.io/cloud-provider/service/helpers"
+	"k8s.io/legacy-cloud-providers/azure/auth"
 	"k8s.io/legacy-cloud-providers/azure/clients/interfaceclient/mockinterfaceclient"
 	"k8s.io/legacy-cloud-providers/azure/clients/loadbalancerclient/mockloadbalancerclient"
 	"k8s.io/legacy-cloud-providers/azure/clients/publicipclient/mockpublicipclient"
@@ -2150,9 +2153,14 @@ func TestGetNodeNameByProviderID(t *testing.T) {
 			fail:       false,
 		},
 		{
+			providerID: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myResourceGroupName/providers/Microsoft.Compute/virtualMachines/k8s-agent-AAAAAAAA-1",
+			name:       "k8s-agent-AAAAAAAA-1",
+			fail:       false,
+		},
+		{
 			providerID: CloudProviderName + ":/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myResourceGroupName/providers/Microsoft.Compute/virtualMachines/k8s-agent-AAAAAAAA-0",
-			name:       "",
-			fail:       true,
+			name:       "k8s-agent-AAAAAAAA-0",
+			fail:       false,
 		},
 		{
 			providerID: CloudProviderName + "://",
@@ -2161,20 +2169,20 @@ func TestGetNodeNameByProviderID(t *testing.T) {
 		},
 		{
 			providerID: ":///subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myResourceGroupName/providers/Microsoft.Compute/virtualMachines/k8s-agent-AAAAAAAA-0",
-			name:       "",
-			fail:       true,
+			name:       "k8s-agent-AAAAAAAA-0",
+			fail:       false,
 		},
 		{
 			providerID: "aws:///subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myResourceGroupName/providers/Microsoft.Compute/virtualMachines/k8s-agent-AAAAAAAA-0",
-			name:       "",
-			fail:       true,
+			name:       "k8s-agent-AAAAAAAA-0",
+			fail:       false,
 		},
 	}
 
 	for _, test := range providers {
 		name, err := az.vmSet.GetNodeNameByProviderID(test.providerID)
 		if (err != nil) != test.fail {
-			t.Errorf("Expected to failt=%t, with pattern %v", test.fail, test)
+			t.Errorf("Expected to fail=%t, with pattern %v", test.fail, test)
 		}
 
 		if test.fail {
@@ -3211,4 +3219,114 @@ func TestGetNodeResourceGroup(t *testing.T) {
 		assert.Nil(t, err, test.name)
 		assert.Equal(t, test.expected, actual, test.name)
 	}
+}
+
+func TestSetInformers(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	az := GetTestCloud(ctrl)
+	az.nodeInformerSynced = nil
+
+	sharedInformers := informers.NewSharedInformerFactory(az.KubeClient, time.Minute)
+	az.SetInformers(sharedInformers)
+	assert.NotNil(t, az.nodeInformerSynced)
+}
+
+func TestUpdateNodeCaches(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	az := GetTestCloud(ctrl)
+
+	zone := fmt.Sprintf("%s-0", az.Location)
+	nodesInZone := sets.NewString("prevNode")
+	az.nodeZones = map[string]sets.String{zone: nodesInZone}
+	az.nodeResourceGroups = map[string]string{"prevNode": "rg"}
+	az.unmanagedNodes = sets.NewString("prevNode")
+
+	prevNode := v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				v1.LabelZoneFailureDomain:  zone,
+				externalResourceGroupLabel: "true",
+				managedByAzureLabel:        "false",
+			},
+			Name: "prevNode",
+		},
+	}
+
+	az.updateNodeCaches(&prevNode, nil)
+	assert.Equal(t, 0, len(az.nodeZones[zone]))
+	assert.Equal(t, 0, len(az.nodeResourceGroups))
+	assert.Equal(t, 0, len(az.unmanagedNodes))
+
+	newNode := v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				v1.LabelZoneFailureDomain:  zone,
+				externalResourceGroupLabel: "true",
+				managedByAzureLabel:        "false",
+			},
+			Name: "newNode",
+		},
+	}
+
+	az.updateNodeCaches(nil, &newNode)
+	assert.Equal(t, 1, len(az.nodeZones[zone]))
+	assert.Equal(t, 1, len(az.nodeResourceGroups))
+	assert.Equal(t, 1, len(az.unmanagedNodes))
+}
+
+func TestGetActiveZones(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	az := GetTestCloud(ctrl)
+
+	az.nodeInformerSynced = nil
+	zones, err := az.GetActiveZones()
+	expectedErr := fmt.Errorf("Azure cloud provider doesn't have informers set")
+	assert.Equal(t, expectedErr, err)
+	assert.Nil(t, zones)
+
+	az.nodeInformerSynced = func() bool { return false }
+	zones, err = az.GetActiveZones()
+	expectedErr = fmt.Errorf("node informer is not synced when trying to GetActiveZones")
+	assert.Equal(t, expectedErr, err)
+	assert.Nil(t, zones)
+
+	az.nodeInformerSynced = func() bool { return true }
+	zone := fmt.Sprintf("%s-0", az.Location)
+	nodesInZone := sets.NewString("node1")
+	az.nodeZones = map[string]sets.String{zone: nodesInZone}
+
+	expectedZones := sets.NewString(zone)
+	zones, err = az.GetActiveZones()
+	assert.Equal(t, expectedZones, zones)
+	assert.NoError(t, err)
+}
+
+func TestInitializeCloudFromConfig(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	az := GetTestCloud(ctrl)
+
+	err := az.InitializeCloudFromConfig(nil, false)
+	assert.NoError(t, err)
+
+	config := Config{
+		DisableAvailabilitySetNodes: true,
+		VMType:                      vmTypeStandard,
+	}
+	err = az.InitializeCloudFromConfig(&config, false)
+	expectedErr := fmt.Errorf("disableAvailabilitySetNodes true is only supported when vmType is 'vmss'")
+	assert.Equal(t, expectedErr, err)
+
+	config = Config{
+		AzureAuthConfig: auth.AzureAuthConfig{
+			Cloud: "AZUREPUBLICCLOUD",
+		},
+	}
+	az.Config.CloudConfigType = cloudConfigTypeFile
+	err = az.InitializeCloudFromConfig(&config, false)
+	expectedErr = fmt.Errorf("useInstanceMetadata must be enabled without Azure credentials")
+	assert.Equal(t, expectedErr, err)
 }
